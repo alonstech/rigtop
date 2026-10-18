@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.DS_Store
+# local editor / agent settings
+.claude/
+.vscode/
+.idea/

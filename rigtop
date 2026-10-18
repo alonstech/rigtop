@@ -1,0 +1,7 @@
+#!/bin/sh
+# rigtop launcher: uses macOS's built-in Python so asdf/pyenv/venv settings never get in the way.
+DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
+if [ -x /usr/bin/python3 ] && /usr/bin/python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
+  exec /usr/bin/python3 "$DIR/rigtop.py" "$@"
+fi
+exec python3 "$DIR/rigtop.py" "$@"

@@ -1,0 +1,1122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="rigtop-token" content="__RIGTOP_TOKEN__">
+<title>rigtop</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231a1a19'/%3E%3Cpath d='M5 17h5l3-7 5 13 3-6h6' fill='none' stroke='%233987e5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f2f1ed; --hover: rgba(11,11,11,.04);
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10); --track: #ebeae5;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  --good-ink: #006300; --crit-ink: #b52f2f; --warn-ink: #8a5a00;
+  --shadow: 0 1px 2px rgba(11,11,11,.04), 0 4px 16px rgba(11,11,11,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --hover: rgba(255,255,255,.04);
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --track: #2c2c2a;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --good-ink: #2fc02f; --crit-ink: #ef7676; --warn-ink: #fab219;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --surface-2: #232321; --hover: rgba(255,255,255,.04);
+  --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --track: #2c2c2a;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --good-ink: #2fc02f; --crit-ink: #ef7676; --warn-ink: #fab219;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1320px; margin: 0 auto; padding: 20px 24px 40px; }
+@media (max-width: 640px) { .wrap { padding: 14px 16px 32px; } }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.muted { color: var(--muted); }
+.ink2 { color: var(--ink-2); }
+.spacer { flex: 1; }
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+/* header */
+header { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand svg { width: 28px; height: 28px; }
+.brand b { font-size: 17px; letter-spacing: -.01em; }
+.hostline { color: var(--ink-2); font-size: 13px; }
+.controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.live { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-2); font-size: 13px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); transition: box-shadow .5s, opacity .3s; }
+.dot.blip { box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 30%, transparent); transition: none; }
+.dot.off { background: var(--muted); }
+.dot.err { background: var(--crit); }
+.jobs { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px 4px 10px; max-width: 420px; }
+.jobs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--track); border-top-color: var(--s1); animation: spin .9s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 8px; padding: 2px; border: 1px solid var(--border); }
+.seg button { border: 0; background: none; padding: 4px 9px; border-radius: 6px; cursor: pointer; color: var(--ink-2); font-size: 12px; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--border); }
+.iconbtn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; color: var(--ink-2); }
+.iconbtn:hover { color: var(--ink); }
+
+/* cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 16px 18px; min-width: 0; }
+.card h2 { font-size: 13px; font-weight: 600; margin: 0; color: var(--ink-2); letter-spacing: .01em; }
+.card-head { display: flex; align-items: center; gap: 8px 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.grid { display: grid; gap: 14px; }
+.tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 14px; }
+.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 14px; }
+@media (max-width: 1180px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+section { margin-bottom: 14px; }
+
+/* tiles */
+.tile { display: flex; flex-direction: column; gap: 10px; }
+.tile .label { font-size: 13px; color: var(--ink-2); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.hero { font-size: 36px; font-weight: 650; letter-spacing: -.025em; line-height: 1; }
+.hero small { font-size: 15px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; margin-left: 4px; }
+.sub { font-size: 12.5px; color: var(--ink-2); }
+.cores { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; height: 26px; align-items: end; }
+.core { background: var(--track); border-radius: 3px; height: 100%; position: relative; overflow: hidden; }
+.core i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--s1); border-radius: 3px 3px 0 0; transition: height .4s ease; }
+.stackbar { display: flex; height: 12px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--surface); }
+.stackbar span { display: block; height: 100%; transition: flex-basis .4s ease; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend i { width: 9px; height: 9px; border-radius: 2.5px; display: inline-block; }
+.legend b { color: var(--ink); font-weight: 600; }
+.meter { height: 8px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 4px; transition: width .4s ease; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; }
+.status svg { width: 22px; height: 22px; flex: none; }
+.quick { margin-top: auto; border-top: 1px solid var(--grid); padding-top: 8px; }
+.quick .qt { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.qrow { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 12.5px; }
+.qrow .qn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qrow .qn.link { cursor: pointer; }
+.qrow .qn.link:hover { text-decoration: underline; text-decoration-color: var(--axis); }
+.qrow .qv { color: var(--ink-2); white-space: nowrap; }
+.qrow .qa { flex: none; min-width: 52px; display: flex; justify-content: flex-end; }
+.qempty { font-size: 12.5px; color: var(--muted); padding: 5px 0; }
+.tile .btn.wide { width: 100%; justify-content: center; margin-top: 6px; }
+
+/* insights */
+.insights { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 400px) { .insights { grid-template-columns: minmax(0, 1fr); } }
+.insight { display: flex; gap: 12px; align-items: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
+.insight svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.insight .body { flex: 1; min-width: 0; }
+.insight .title { font-weight: 600; font-size: 13.5px; }
+.insight .text { color: var(--ink-2); font-size: 12.5px; margin-top: 2px; }
+.insight .act { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); border-radius: 8px; padding: 5px 10px; font-size: 12.5px; cursor: pointer; white-space: nowrap; font-weight: 500; transition: background .12s, color .12s; }
+.btn:hover { background: var(--hover); border-color: var(--axis); }
+.btn.primary { background: var(--s1); color: #fff; border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--crit-ink); }
+.btn.danger:hover { border-color: var(--crit); }
+.btn.solid-danger, .btn.armed { background: var(--crit); color: #fff; border-color: transparent; }
+.btn.sm { padding: 3px 9px; font-size: 12px; }
+.btn[disabled] { opacity: .55; cursor: progress; }
+.btn.ghost { background: none; }
+
+/* charts */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.18); white-space: nowrap; opacity: 0; transition: opacity .1s; z-index: 2; }
+.chart .tip .t { color: var(--muted); margin-bottom: 4px; }
+.chart .tip div.r { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.chart .tip div.r span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.chart .tip i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.axis text { fill: var(--muted); font-size: 11px; }
+.strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
+.strip svg { flex: 1; height: 10px; display: block; }
+
+/* clean-up panel */
+.clean-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 22px; }
+@media (max-width: 960px) { .clean-grid { grid-template-columns: minmax(0, 1fr); } }
+.subhead { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 4px; display: flex; align-items: center; gap: 8px; }
+.subhead:first-child { margin-top: 0; }
+.crow { display: grid; grid-template-columns: 20px minmax(0, 1fr) 76px auto; gap: 4px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--grid); }
+.crow:last-child { border-bottom: 0; }
+.crow input { width: 15px; height: 15px; margin: 0; accent-color: var(--s1); cursor: pointer; }
+.crow .cl { min-width: 0; }
+.crow .cl b { font-weight: 550; font-size: 13px; }
+.crow .cl .h { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crow .cs { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.crow .cs.big { color: var(--crit-ink); }
+.crow .ca { display: flex; justify-content: flex-end; min-width: 62px; }
+.cleanbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; margin: 0 0 12px; background: var(--surface-2); border-radius: 10px; border: 1px solid var(--border); }
+.cleanbar .big { font-size: 20px; font-weight: 650; letter-spacing: -.01em; }
+.crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 6px; }
+.crumbs button { border: 0; background: none; padding: 2px 4px; border-radius: 5px; cursor: pointer; color: var(--s1); }
+.crumbs button:hover { background: var(--hover); }
+.crumbs span { color: var(--muted); }
+.drow { display: grid; grid-template-columns: minmax(0, 1fr) 110px 70px auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--grid); font-size: 12.5px; }
+.drow:last-child { border-bottom: 0; }
+.drow .dn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.drow .dn:hover { color: var(--s1); }
+.drow .bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.drow .bar i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+.drow .ds { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+@media (max-width: 560px) { .drow { grid-template-columns: minmax(0, 1fr) 64px auto; } .drow .bar { display: none; } }
+
+/* apps table */
+.table { width: 100%; border-collapse: collapse; }
+.table th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.table td { padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+.table tr.row { cursor: pointer; }
+.table tr.row:hover td { background: var(--hover); }
+.table .name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.table .name .n { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table .badge { font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 10px; padding: 1px 7px; white-space: nowrap; }
+.chev { width: 14px; height: 14px; color: var(--muted); transition: transform .15s; flex: none; }
+tr.open .chev { transform: rotate(90deg); }
+.barcell { display: flex; align-items: center; gap: 10px; min-width: 120px; }
+.barcell .bar { flex: 1; height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+.barcell .bar i { display: block; height: 100%; border-radius: 3px; transition: width .4s ease; }
+.barcell .v { width: 64px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+.col-cpu, .col-mem { width: 26%; }
+.col-act { width: 1%; text-align: right; white-space: nowrap; }
+tr.detail td { background: var(--surface-2); padding: 0; }
+.procs { padding: 6px 10px 10px 34px; }
+.proc { display: grid; grid-template-columns: 70px minmax(0, 1fr) 80px 80px auto; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--grid); font-size: 12.5px; }
+.proc:last-child { border-bottom: 0; }
+.proc .args { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.proc .acts { display: flex; gap: 4px; justify-content: flex-end; }
+.tablefoot { display: flex; justify-content: center; padding-top: 10px; }
+input.search { border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); border-radius: 8px; padding: 5px 10px; font-size: 12.5px; width: 160px; outline: none; }
+input.search:focus { border-color: var(--s1); }
+@media (max-width: 700px) {
+  .proc { grid-template-columns: 56px minmax(0, 1fr) auto; }
+  .proc .pc, .proc .pm { display: none; }
+  .procs { padding-left: 12px; }
+  .table { table-layout: fixed; }
+  .table .col-cpu, .table .col-mem { width: 64px; }
+  .table .col-act { width: 74px; }
+  .barcell { min-width: 0; } .barcell .bar, .table .badge { display: none; }
+  .barcell .v { width: 100%; }
+  input.search { width: 100%; order: 10; }
+}
+
+/* docker */
+.disk-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; padding: 12px 0; border-bottom: 1px solid var(--grid); }
+.disk-row:last-of-type { border-bottom: 0; }
+.disk-row:first-child { padding-top: 0; }
+.disk-row .top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.disk-row .top b { font-weight: 600; }
+.disk-row .hint { font-size: 12px; color: var(--muted); grid-column: 1 / -1; }
+.disk-row .acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.disk-row .meter { grid-column: 1 / -1; height: 10px; display: flex; gap: 2px; background: none; }
+.disk-row .meter i { border-radius: 3px; }
+.proj { border: 1px solid var(--grid); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+.proj-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); flex-wrap: wrap; }
+.proj-head b { font-weight: 600; }
+.ctr { display: grid; grid-template-columns: 14px minmax(0, 1.4fr) minmax(0, 1fr) 64px 76px auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--grid); font-size: 12.5px; }
+.ctr .nm { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctr .im { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctr .acts { display: flex; gap: 4px; justify-content: flex-end; }
+@media (max-width: 700px) { .ctr { grid-template-columns: 14px minmax(0, 1fr) 56px auto; } .ctr .im, .ctr .cm { display: none; } }
+.sdot { width: 8px; height: 8px; border-radius: 50%; }
+.empty { color: var(--muted); font-size: 13px; padding: 16px 0; text-align: center; }
+.vmline { display: flex; gap: 8px 18px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--ink-2); margin-bottom: 12px; }
+.vmline b { color: var(--ink); font-weight: 600; }
+
+footer { color: var(--muted); font-size: 12px; display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; margin-top: 18px; }
+
+/* dialog + toast */
+dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--ink); padding: 20px 22px; width: min(520px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+dialog::backdrop { background: rgba(0,0,0,.45); backdrop-filter: blur(2px); }
+dialog h3 { margin: 0 0 8px; font-size: 16px; }
+dialog p { margin: 0 0 12px; color: var(--ink-2); font-size: 13.5px; }
+dialog pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 0 0 16px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+dialog .row { display: flex; justify-content: flex-end; gap: 8px; }
+.toasts { position: fixed; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 10; max-width: calc(100vw - 36px); }
+.toast { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--good); border-radius: 10px; padding: 10px 14px; font-size: 13px; box-shadow: 0 8px 30px rgba(0,0,0,.25); max-width: 420px; }
+.toast.bad { border-left-color: var(--crit); }
+.toast b { font-weight: 650; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 3s !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--surface-2)" stroke="var(--border)"/><path d="M5 17h5l3-7 5 13 3-6h6" fill="none" stroke="var(--s1)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <b>rigtop</b>
+    </div>
+    <span class="hostline" id="hostline">connecting…</span>
+    <span class="spacer"></span>
+    <span class="jobs" id="jobs" hidden><i class="spin"></i><span id="jobs-text"></span></span>
+    <div class="controls">
+      <span class="live"><span class="dot" id="dot"></span><span id="livetext">Live</span></span>
+      <div class="seg" id="rate" role="group" aria-label="Refresh rate">
+        <button data-v="2">2s</button><button data-v="3">3s</button><button data-v="5">5s</button><button data-v="10">10s</button><button data-v="0">Pause</button>
+      </div>
+      <button class="iconbtn" id="theme" title="Theme: auto" aria-label="Toggle theme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="grid tiles">
+    <div class="card tile">
+      <div class="label">CPU</div>
+      <div class="hero num" id="cpu-hero">–</div>
+      <div class="sub num" id="cpu-sub">&nbsp;</div>
+      <div class="cores" id="cores"></div>
+      <div class="quick"><div class="qt">Busiest now</div><div id="q-cpu"></div></div>
+    </div>
+    <div class="card tile">
+      <div class="label">Memory pressure</div>
+      <div class="hero status" id="pr-hero">–</div>
+      <div class="meter"><i id="pr-meter" style="width:0"></i></div>
+      <div class="sub num" id="pr-sub">&nbsp;</div>
+      <div class="quick"><div class="qt">Biggest memory users</div><div id="q-mem"></div></div>
+    </div>
+    <div class="card tile">
+      <div class="label">Memory</div>
+      <div class="hero num" id="mem-hero">–</div>
+      <div class="stackbar" id="mem-bar"></div>
+      <div class="legend num" id="mem-legend"></div>
+      <div class="quick"><div class="qt">Reclaim memory</div><div id="q-reclaim"></div></div>
+    </div>
+    <div class="card tile">
+      <div class="label">Disk</div>
+      <div class="hero num" id="disk-hero">–</div>
+      <div class="meter"><i id="disk-meter" style="width:0"></i></div>
+      <div class="sub num" id="disk-sub">&nbsp;</div>
+      <div class="quick"><div class="qt">Biggest you can clean</div><div id="q-disk"></div>
+        <button class="btn primary wide" id="clean-safe" hidden></button></div>
+    </div>
+  </div>
+
+  <div class="insights" id="insights"></div>
+
+  <section class="card" id="clean-card">
+    <div class="card-head"><h2>Free up disk space</h2><span class="spacer"></span>
+      <span class="muted" style="font-size:12px" id="scan-age"></span>
+      <button class="btn sm ghost" id="rescan">Re-measure</button></div>
+    <div class="clean-grid">
+      <div>
+        <div class="cleanbar">
+          <div><div class="muted" style="font-size:12px">Selected</div><div class="big num" id="sel-total">–</div></div>
+          <span class="spacer"></span>
+          <button class="btn sm ghost" id="sel-safe">Select safe</button>
+          <button class="btn primary" id="clean-selected">Clean selected</button>
+        </div>
+        <div id="clean-list"><div class="empty">Measuring caches at low priority…</div></div>
+      </div>
+      <div>
+        <div class="subhead">Where's the rest of your disk?</div>
+        <div id="explorer"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid two">
+    <div class="card">
+      <div class="card-head"><h2 id="cpu-chart-title">CPU</h2><span class="spacer"></span>
+        <div class="legend"><span><i style="background:var(--s1)"></i>User</span><span><i style="background:var(--s2)"></i>System</span></div></div>
+      <div class="chart" id="cpu-chart"><svg height="170"></svg><div class="tip"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2 id="mem-chart-title">Memory</h2><span class="spacer"></span>
+        <div class="legend"><span><i style="background:var(--s1)"></i>App</span><span><i style="background:var(--s2)"></i>Wired</span><span><i style="background:var(--s3)"></i>Compressed</span><span><i style="background:var(--s4)"></i>Swap</span></div></div>
+      <div class="chart" id="mem-chart"><svg height="170"></svg><div class="tip"></div></div>
+      <div class="strip"><span>Pressure</span><svg id="pr-strip" preserveAspectRatio="none"></svg><span id="pr-strip-now"></span></div>
+    </div>
+  </div>
+
+  <section class="card" id="apps-card">
+    <div class="card-head">
+      <h2>What's using your Mac</h2>
+      <span class="muted" style="font-size:12px">grouped by app · CPU is % of the whole machine · click a row for its processes</span>
+      <span class="spacer"></span>
+      <input class="search" id="search" placeholder="Filter apps…" autocomplete="off">
+      <div class="seg" id="sort" role="group" aria-label="Sort by">
+        <button data-v="cpu">CPU</button><button data-v="mem">Memory</button>
+      </div>
+    </div>
+    <table class="table">
+      <thead><tr><th>App</th><th class="col-cpu">CPU</th><th class="col-mem">Memory</th><th class="col-act"></th></tr></thead>
+      <tbody id="apps"></tbody>
+    </table>
+    <div class="tablefoot"><button class="btn ghost sm" id="more">Show more</button></div>
+  </section>
+
+  <div class="grid two" id="docker-section">
+    <div class="card">
+      <div class="card-head"><h2>Docker disk usage</h2><span class="spacer"></span><span class="muted" style="font-size:12px" id="df-age"></span></div>
+      <div id="disk-rows"><div class="empty">Checking Docker…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Containers</h2><span class="spacer"></span>
+        <button class="btn sm" id="prune-stopped" hidden>Remove stopped</button></div>
+      <div class="vmline num" id="vmline"></div>
+      <div id="containers"><div class="empty">Checking Docker…</div></div>
+    </div>
+  </div>
+
+  <footer>
+    <span id="selfcost">rigtop overhead: –</span>
+    <span>Samples only while this tab is visible · cleanups run at background priority · nothing is written to disk</span>
+  </footer>
+</div>
+
+<dialog id="confirm">
+  <h3 id="c-title"></h3>
+  <p id="c-body"></p>
+  <pre class="mono" id="c-cmd"></pre>
+  <div class="row"><button class="btn" id="c-cancel">Cancel</button><button class="btn primary" id="c-ok">Confirm</button></div>
+</dialog>
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+const TOKEN = document.querySelector('meta[name="rigtop-token"]').content;
+const $ = (s, el = document) => el.querySelector(s);
+const GB = 1024 ** 3, MB = 1024 ** 2, WINDOW = 15 * 60;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("rigtop." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("rigtop." + k, JSON.stringify(v)); } catch {} },
+};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtB = (b, d = 1) => b >= 1e12 * 0.98 ? (b / 1e12).toFixed(1) + " TB" : b >= GB ? (b / GB).toFixed(b >= 100 * GB ? 0 : d) + " GB" : b >= MB ? Math.round(b / MB) + " MB" : Math.round(b / 1024) + " KB";
+const fmtPct = p => (p >= 10 ? p.toFixed(0) : p.toFixed(1)) + "%";
+const tilde = p => S && p.startsWith(S.home) ? "~" + p.slice(S.home.length) : p;
+
+const ICON = {
+  good: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="var(--good)"/><path d="M7 12.5l3.2 3L17 9" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  warning: '<svg viewBox="0 0 24 24"><path d="M12 2.8 22.4 20.6H1.6Z" fill="var(--warn)" stroke="var(--warn)" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 9v5" stroke="#1a1a19" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.4" fill="#1a1a19"/></svg>',
+  critical: '<svg viewBox="0 0 24 24"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8z" fill="var(--crit)"/><path d="M12 7v6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="16.6" r="1.4" fill="#fff"/></svg>',
+  info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="var(--muted)" stroke-width="2"/><path d="M12 11v6" stroke="var(--ink-2)" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="7.6" r="1.3" fill="var(--ink-2)"/></svg>',
+};
+const CHEV = '<svg class="chev" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const PRESSURE = { 1: ["good", "Normal", "var(--good)"], 2: ["warning", "Elevated", "var(--warn)"], 4: ["critical", "Critical", "var(--crit)"] };
+
+// ── state ──
+let S = null, hist = [], lastT = 0, every = store.get("every", 3), timer = null, fails = 0;
+let sortBy = store.get("sort", "cpu"), showAll = false, filter = "";
+const open = new Map();          // group name -> procs[]
+let pointerDown = false;
+addEventListener("pointerdown", () => pointerDown = true);
+addEventListener("pointerup", () => setTimeout(() => pointerDown = false, 50));
+const busy = key => !!S && S.jobs.some(j => j.state === "running" && j.key === key);
+
+// ── theme ──
+const themes = ["auto", "light", "dark"];
+function applyTheme(t) {
+  if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme = t;
+  $("#theme").title = "Theme: " + t;
+}
+let theme = store.get("theme", "auto"); applyTheme(theme);
+$("#theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; store.set("theme", theme); applyTheme(theme); renderCharts(); };
+
+// ── segmented controls ──
+function seg(el, value, onPick) {
+  const sync = v => el.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === String(v))));
+  sync(value);
+  el.onclick = e => { const b = e.target.closest("button"); if (!b) return; sync(b.dataset.v); onPick(b.dataset.v); };
+  return sync;
+}
+seg($("#rate"), every, v => { every = +v; store.set("every", every); schedule(0); });
+const syncSort = seg($("#sort"), sortBy, v => { sortBy = v; store.set("sort", v); renderApps(); });
+$("#search").oninput = e => { filter = e.target.value.trim().toLowerCase(); renderApps(); };
+$("#more").onclick = () => { showAll = !showAll; renderApps(); };
+
+// ── polling (stops entirely when the tab is hidden) ──
+function schedule(ms) {
+  clearTimeout(timer);
+  if (!every || document.hidden) { setLive(); return; }
+  timer = setTimeout(poll, ms ?? every * 1000);
+}
+async function poll() {
+  try {
+    const r = await fetch(`/api/state?since=${lastT}&every=${every}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const s = await r.json();
+    fails = 0;
+    for (const h of s.history) hist.push(h);
+    if (hist.length) lastT = hist[hist.length - 1][0];
+    const cut = s.t - WINDOW;
+    while (hist.length && hist[0][0] < cut) hist.shift();
+    S = s;
+    render();
+    refreshOpenGroups();
+    const d = $("#dot"); d.classList.add("blip"); requestAnimationFrame(() => requestAnimationFrame(() => d.classList.remove("blip")));
+  } catch (e) { fails++; }
+  setLive();
+  schedule();
+}
+function setLive() {
+  const d = $("#dot"), t = $("#livetext");
+  d.classList.toggle("off", !every); d.classList.toggle("err", fails > 1);
+  t.textContent = fails > 1 ? "Can't reach rigtop — is it still running?" : !every ? "Paused" : "Live";
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(0); else clearTimeout(timer); });
+
+// ── small building blocks ──
+
+// Two-tap button: the first tap arms it (turns red), the second tap within 3.5s runs it.
+// Fast, but never a single accidental click. Specs with `dialog` open a confirmation instead.
+function quickBtn(spec) {
+  const b = document.createElement("button");
+  b.className = "btn sm" + (spec.cls ? " " + spec.cls : "");
+  b.textContent = spec.label;
+  b._spec = spec;
+  b.onclick = async e => {
+    e.stopPropagation();
+    const s = b._spec;
+    if (b.disabled) return;
+    if (s.dialog) { if (await confirmDialog(s.dialog)) s.run(b); return; }
+    if (!b.classList.contains("armed")) {
+      b.classList.add("armed"); b.textContent = s.armed || "Sure?";
+      b._t = setTimeout(() => { b.classList.remove("armed"); b.textContent = b._spec.label; }, 3500);
+      return;
+    }
+    clearTimeout(b._t); b.classList.remove("armed"); b.textContent = s.label;
+    s.run(b);
+  };
+  return b;
+}
+// keyed children: reuse DOM nodes by key so armed buttons, checkboxes and hover survive refreshes
+function keyed(container, items, build, update) {
+  const old = new Map([...container.children].filter(el => el.dataset.key).map(el => [el.dataset.key, el]));
+  [...container.children].forEach(el => { if (!el.dataset.key) el.remove(); });
+  items.forEach((it, i) => {
+    let el = old.get(it.key);
+    if (!el) { el = build(it); el.dataset.key = it.key; }
+    old.delete(it.key);
+    update(el, it);
+    if (container.children[i] !== el) container.insertBefore(el, container.children[i] || null);
+  });
+  for (const el of old.values()) el.remove();
+}
+function setAction(slot, spec, isBusy) {
+  const sig = spec ? (spec.note ?? "") + "|" + (spec.label || "") + "|" + (spec.cls || "") : "";
+  if (slot.dataset.sig !== sig) {
+    slot.dataset.sig = sig; slot.innerHTML = "";
+    if (spec) slot.appendChild(spec.note !== undefined ? Object.assign(document.createElement("span"), { className: "muted", textContent: spec.note, style: "font-size:11.5px" }) : quickBtn(spec));
+  }
+  const b = slot.querySelector("button");
+  if (b && spec) { b._spec = spec; b.disabled = !!isBusy; if (isBusy) b.textContent = "Working…"; else if (!b.classList.contains("armed")) b.textContent = spec.label; }
+}
+function quickList(el, items, empty) {
+  if (!items.length) { el.innerHTML = `<div class="qempty">${esc(empty)}</div>`; return; }
+  keyed(el, items, () => {
+    const r = document.createElement("div"); r.className = "qrow";
+    r.innerHTML = `<span class="qn"></span><span class="qv num"></span><span class="qa"></span>`;
+    return r;
+  }, (r, it) => {
+    const n = $(".qn", r); n.textContent = it.name; n.title = it.title || it.name;
+    n.classList.toggle("link", !!it.onName); n.onclick = it.onName || null;
+    $(".qv", r).textContent = it.value;
+    setAction($(".qa", r), it.action, it.busy);
+  });
+}
+
+// what one tap does to an app group
+function appAction(a) {
+  if (a.name === "Docker VM") return dockerRestartSpec();
+  if (a.quittable) return { label: "Quit", armed: "Quit?", run: b => act({ kind: "app", name: a.name }, b) };
+  if (a.killable) return { label: "End", armed: a.count > 1 ? `End ${a.count}?` : "End?", run: b => act({ kind: "group", name: a.name }, b) };
+  return { note: a.own ? "" : "system" };
+}
+function dockerRestartSpec(label = "Restart") {
+  return { label, run: b => act({ kind: "docker", action: "desktop-restart" }, b),
+    dialog: { title: "Restart Docker Desktop?", body: "Restarts the Docker VM so macOS gets its cached memory back. Running containers stop; those with a restart policy come back by themselves, the rest you can start again from the Containers panel.", cmd: "docker desktop restart", ok: "Restart Docker" } };
+}
+
+// ── render ──
+function render() {
+  const h = S.host;
+  $("#hostline").textContent = `${h.name} · ${h.chip} · ${h.cores} cores · ${Math.round(h.mem_total / GB)} GB · ${h.os}`;
+  renderJobs(); renderTiles(); renderInsights(); renderCleanup(); renderCharts();
+  if (!pointerDown) renderApps();
+  renderDocker();
+  const sc = S.self;
+  $("#selfcost").innerHTML = `rigtop overhead: <b class="num">${sc.cpu.toFixed(2)}%</b> CPU · <b class="num">${fmtB(sc.rss)}</b> memory`;
+}
+
+// background jobs: a header pill while running, a toast when each one finishes
+const seenJobs = new Map();
+function renderJobs() {
+  for (const j of S.jobs) {
+    const prev = seenJobs.get(j.id);
+    if (prev === "running" && j.state !== "running") {
+      const freed = j.freed > 50 * MB ? ` — <b>freed ${fmtB(j.freed)}</b>` : "";
+      toast(`${esc(j.label)}: ${j.state === "done" ? "done" : "failed"}${freed}${j.message && j.state !== "done" ? " — " + esc(j.message) : ""}`, j.state === "done", true);
+      if (j.key.startsWith("scan:")) loadDu(curDu);
+    }
+    seenJobs.set(j.id, j.state);
+  }
+  const running = S.jobs.filter(j => j.state === "running");
+  $("#jobs").hidden = !running.length;
+  $("#jobs-text").textContent = running.map(j => j.label + "…").join(" · ");
+}
+
+function renderTiles() {
+  const c = S.cpu, m = S.mem, h = S.host, apps = S.apps;
+  $("#cpu-hero").innerHTML = `${Math.round(c.total)}<small>%</small>`;
+  $("#cpu-sub").textContent = `≈ ${(c.total / 100 * h.cores).toFixed(1)} of ${h.cores} cores busy · load ${S.load[0].toFixed(1)}`;
+  const cores = $("#cores");
+  if (cores.children.length !== c.cores.length) cores.innerHTML = c.cores.map(() => '<div class="core"><i></i></div>').join("");
+  c.cores.forEach((v, i) => { const el = cores.children[i]; el.firstChild.style.height = Math.max(v, 2) + "%"; el.title = `core ${i + 1}: ${v.toFixed(0)}%`; });
+  const byCpu = [...apps].filter(a => a.name !== "rigtop (this tool)").sort((a, b) => b.cpu - a.cpu).slice(0, 3);
+  quickList($("#q-cpu"), byCpu.map(a => ({ key: a.name, name: a.name, value: fmtPct(a.cpu), title: `${a.name}: ${a.count} process(es), ≈ ${(a.cpu * h.cores / 100).toFixed(1)} cores`,
+    onName: () => revealGroup(a.name), action: appAction(a), busy: a.name === "Docker VM" && busy("docker:desktop-restart") })), "Waiting for process data…");
+
+  const [kind, word, col] = PRESSURE[m.pressure_level] || PRESSURE[1];
+  $("#pr-hero").innerHTML = ICON[kind] + `<span>${word}</span>`;
+  $("#pr-meter").style.width = (100 - m.free_pct) + "%"; $("#pr-meter").style.background = col;
+  $("#pr-sub").textContent = `${m.free_pct}% free · swap ${fmtB(m.swap_used)}` + (m.swapouts + m.swapins > 0 ? ` · swapping ${fmtB(m.swapouts + m.swapins)}/s` : "");
+  const byMem = [...apps].filter(a => a.name !== "rigtop (this tool)").sort((a, b) => b.mem - a.mem).slice(0, 3);
+  quickList($("#q-mem"), byMem.map(a => ({ key: a.name, name: a.name, value: fmtB(a.mem), onName: () => revealGroup(a.name),
+    action: appAction(a), busy: a.name === "Docker VM" && busy("docker:desktop-restart") })), "Waiting for process data…");
+
+  $("#mem-hero").innerHTML = `${(m.used / GB).toFixed(1)}<small>of ${Math.round(m.total / GB)} GB</small>`;
+  const parts = [["App", m.app, "var(--s1)"], ["Wired", m.wired, "var(--s2)"], ["Compressed", m.compressed, "var(--s3)"], ["Cached", m.cached, "var(--s4)"]];
+  const bar = $("#mem-bar");
+  if (!bar.children.length) bar.innerHTML = parts.map(p => `<span style="background:${p[2]}"></span>`).join("") + '<span style="background:var(--track);flex:1"></span>';
+  parts.forEach((p, i) => { bar.children[i].style.flexBasis = (p[1] / m.total * 100) + "%"; bar.children[i].title = `${p[0]}: ${fmtB(p[1])}`; });
+  $("#mem-legend").innerHTML = parts.map(p => `<span><i style="background:${p[2]}"></i>${p[0]} <b>${fmtB(p[1])}</b></span>`).join("") +
+    `<span><i style="background:var(--track)"></i>Free <b>${fmtB(m.free)}</b></span>`;
+  // reclaim: orphaned dev processes, Docker's VM cache, then apps sitting idle on lots of memory
+  const rec = [], o = S.orphans;
+  if (o.count) rec.push({ key: "orphans", name: `${o.count} orphaned dev process${o.count > 1 ? "es" : ""}`, value: fmtB(o.mem),
+    title: "node/python/bun processes whose parent exited: leftovers from crashed agent runs or forgotten dev servers", onName: () => revealGroup("__orphans__"),
+    action: { label: "End all", armed: `End ${o.count}?`, run: b => act({ kind: "orphans" }, b) } });
+  const vm = apps.find(a => a.name === "Docker VM");
+  if (vm && vm.mem > 1.5 * GB && S.docker.running) rec.push({ key: "dockervm", name: "Docker VM cache", value: fmtB(vm.mem),
+    onName: () => $("#docker-section").scrollIntoView({ behavior: "smooth" }), action: dockerRestartSpec(), busy: busy("docker:desktop-restart") });
+  // agents waiting for your input and terminals look idle but aren't, so they're never suggested here
+  const busyLooking = /claude|codex|gemini|cursor|antigravity|windsurf|terminal|iterm|warp|ghostty|kitty|alacritty|wezterm|code|zed|docker/i;
+  const idle = apps.filter(a => a.cpu < 0.15 && a.mem > 400 * MB && (a.quittable || a.killable) && !busyLooking.test(a.name)).sort((a, b) => b.mem - a.mem).slice(0, Math.max(1, 3 - rec.length));
+  for (const a of idle) rec.push({ key: "idle:" + a.name, name: `${a.name} (idle)`, value: fmtB(a.mem), title: `${a.name} is using almost no CPU but holds ${fmtB(a.mem)}`,
+    onName: () => revealGroup(a.name), action: appAction(a) });
+  quickList($("#q-reclaim"), rec, "Nothing obvious to reclaim right now.");
+
+  const dk = S.disk, usedPct = (1 - dk.free / dk.total) * 100;
+  $("#disk-hero").innerHTML = `${fmtB(dk.free, 0)}<small>free</small>`;
+  const dcol = dk.free < 30 * GB ? "var(--crit)" : dk.free < 80 * GB ? "var(--warn)" : "var(--s1)";
+  $("#disk-meter").style.width = usedPct + "%"; $("#disk-meter").style.background = dcol;
+  $("#disk-sub").textContent = `${usedPct.toFixed(0)}% full · ${fmtB(dk.total - dk.free)} used of ${fmtB(dk.total)}`;
+  const all = cleanables(), items = [...all].sort((a, b) => b.size - a.size).slice(0, 3);
+  quickList($("#q-disk"), items.map(it => ({ key: it.id, name: it.label, value: fmtB(it.size), title: it.path, onName: () => $("#clean-card").scrollIntoView({ behavior: "smooth" }),
+    action: cleanSpec(it), busy: busy(it.job) || busy("clean-selected") })), S.caches.t ? "Nothing big to clean." : "Measuring caches…");
+  const safe = all.filter(i => i.safe), safeTotal = safe.reduce((a, i) => a + i.size, 0);
+  const cs = $("#clean-safe");
+  cs.hidden = safeTotal < 200 * MB;
+  cs.textContent = busy("clean-selected") ? "Cleaning…" : `Clean all safe caches · ${fmtB(safeTotal)}`;
+  cs.disabled = busy("clean-selected");
+  cs.onclick = () => cleanMany(safe);
+}
+
+// ── clean-up: what can go, and how ──
+function cleanables() {
+  const c = S.caches, d = S.docker, df = d.df || {}, out = [];
+  for (const t of c.targets) if (t.size > 50 * MB) out.push({ id: t.id, label: t.label, path: t.path, size: t.size, safe: t.safe, hint: t.hint, job: "cache:" + t.id, group: "dev" });
+  if (d.running) {
+    if (df.build_cache?.reclaimable > 50 * MB) out.push({ id: "docker:builder-prune-all", label: "Docker build cache", path: "docker builder prune -af", size: df.build_cache.reclaimable, safe: true,
+      hint: "Unused build layers. Builds that need them rebuild.", job: "docker:builder-prune-all", group: "dev" });
+    if (df.images?.reclaimable > 50 * MB) out.push({ id: "docker:image-prune-unused", label: "Docker unused images", path: "docker image prune -af", size: df.images.reclaimable, safe: false,
+      hint: "Images no container uses. Pulled again when needed.", job: "docker:image-prune-unused", group: "dev" });
+    if (df.containers?.reclaimable > 50 * MB) out.push({ id: "docker:container-prune", label: "Stopped containers", path: "docker container prune -f", size: df.containers.reclaimable, safe: true,
+      hint: "Containers that have exited.", job: "docker:container-prune", group: "dev" });
+  }
+  for (const a of c.app_caches) out.push({ id: a.id, label: a.label, path: a.path, size: a.size, safe: false,
+    hint: "App cache. Quit the app first; it rebuilds what it needs.", job: a.id, group: "app" });
+  return out;
+}
+function cleanPayload(it) { return it.id.startsWith("docker:") ? { kind: "docker", action: it.id.slice(7) } : { kind: "cache", id: it.id }; }
+function cleanSpec(it) { return { label: "Clean", armed: `Clean ${fmtB(it.size)}?`, run: b => act(cleanPayload(it), b) }; }
+async function cleanMany(list) {
+  if (!list.length) return toast("Nothing selected", false);
+  const total = list.reduce((a, i) => a + i.size, 0);
+  const yes = await confirmDialog({ title: `Clean ${list.length} item${list.length > 1 ? "s" : ""} · ${fmtB(total)}?`,
+    body: "These are caches and leftovers that tools rebuild or re-download on their own. It runs in the background at low priority; a build that's running right now may need one re-run.",
+    cmd: list.map(i => `${fmtB(i.size).padStart(8)}  ${i.label}  (${tilde(i.path)})`).join("\n"), ok: `Clean ${fmtB(total)}` });
+  if (yes) act({ kind: "clean-selected", ids: list.map(i => i.id) });
+}
+
+const selected = new Set(), seenClean = new Set();
+$("#sel-safe").onclick = () => { selected.clear(); for (const i of cleanables()) if (i.safe) selected.add(i.id); renderCleanup(); };
+$("#clean-selected").onclick = () => cleanMany(cleanables().filter(i => selected.has(i.id)));
+$("#rescan").onclick = () => act({ kind: "scan-caches" });
+function renderCleanup() {
+  const c = S.caches, list = cleanables();
+  for (const i of list) if (!seenClean.has(i.id)) { seenClean.add(i.id); if (i.safe) selected.add(i.id); }
+  const measuring = c.scanning || busy("cache-scan");
+  $("#scan-age").textContent = measuring ? "measuring…" : c.t ? "measured " + new Date(c.t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  $("#rescan").disabled = measuring;
+  const box = $("#clean-list");
+  if (!c.t && !list.length) box.innerHTML = `<div class="empty">Measuring caches at low priority… (the first scan takes about 30 seconds)</div>`;
+  else {
+    const rows = [];
+    const dev = list.filter(i => i.group === "dev").sort((a, b) => b.size - a.size), app = list.filter(i => i.group === "app");
+    if (dev.length) rows.push({ key: "h:dev", head: "Developer caches & Docker" }, ...dev.map(i => ({ key: i.id, it: i })));
+    if (app.length) rows.push({ key: "h:app", head: "App caches (~/Library/Caches)" }, ...app.map(i => ({ key: i.id, it: i })));
+    rows.push({ key: "h:trash", head: "Trash" }, { key: "trash", trash: true });
+    keyed(box, rows, r => {
+      const el = document.createElement("div");
+      if (r.head) { el.className = "subhead"; el.textContent = r.head; return el; }
+      el.className = "crow";
+      el.innerHTML = r.trash ? `<span></span><div class="cl"><b>Empty the Trash</b><div class="h">Permanently deletes what's in the Trash. macOS privacy hides its size from rigtop.</div></div><span class="cs"></span><span class="ca"></span>`
+        : `<input type="checkbox"><div class="cl"><b></b><div class="h"></div></div><span class="cs"></span><span class="ca"></span>`;
+      const cb = $("input", el);
+      if (cb) cb.onchange = () => { cb.checked ? selected.add(el.dataset.key) : selected.delete(el.dataset.key); updateSel(); };
+      return el;
+    }, (el, r) => {
+      if (r.head) return;
+      if (r.trash) {
+        setAction($(".ca", el), { label: "Empty", cls: "danger", run: b => act({ kind: "trash" }, b),
+          dialog: { title: "Empty the Trash?", body: "Everything in the Trash is deleted permanently. macOS may ask once to let your terminal control Finder.", danger: true, ok: "Empty Trash" } }, busy("trash"));
+        return;
+      }
+      const it = r.it;
+      $("input", el).checked = selected.has(it.id);
+      $("b", el).textContent = it.label;
+      const hEl = $(".h", el); hEl.textContent = it.hint + " · " + tilde(it.path); hEl.title = it.path;
+      const cs = $(".cs", el); cs.textContent = fmtB(it.size); cs.classList.toggle("big", it.size > 20 * GB);
+      setAction($(".ca", el), cleanSpec(it), busy(it.job) || busy("clean-selected"));
+    });
+  }
+  updateSel();
+  renderExplorer();
+}
+function updateSel() {
+  const list = cleanables().filter(i => selected.has(i.id)), total = list.reduce((a, i) => a + i.size, 0);
+  $("#sel-total").textContent = list.length ? `${fmtB(total)} · ${list.length} item${list.length > 1 ? "s" : ""}` : "nothing";
+  $("#clean-selected").disabled = !list.length || busy("clean-selected");
+  $("#clean-selected").textContent = busy("clean-selected") ? "Cleaning…" : "Clean selected";
+}
+
+// ── folder explorer: where the rest of the disk went (read-only; reveal in Finder) ──
+let curDu = null;
+const duCache = new Map();
+async function loadDu(path) {
+  try {
+    const r = await (await fetch("/api/du?path=" + encodeURIComponent(path || ""))).json();
+    curDu = r.path; duCache.set(r.path, r); renderExplorer();
+  } catch {}
+}
+function renderExplorer() {
+  const el = $("#explorer");
+  if (!S) return;
+  if (curDu === null) { curDu = S.home; loadDu(S.home); }
+  const d = duCache.get(curDu), scanning = busy("scan:" + curDu);
+  const key = JSON.stringify([curDu, d?.t, d?.pending, scanning]);
+  if (el.dataset.k === key) return;
+  el.dataset.k = key;
+  const parts = tilde(curDu).split("/").filter(Boolean);
+  let crumbs = "", acc = S.home;
+  parts.forEach((p, i) => { if (i > 0) acc += "/" + p; crumbs += (i ? "<span>/</span>" : "") + `<button data-p="${esc(i ? acc : S.home)}">${esc(p)}</button>`; });
+  let body;
+  if (!d || d.pending) body = `<div class="empty">${scanning ? "Measuring… big folders can take a few minutes. It runs at background priority."
+      : `<button class="btn primary" data-scan="1">Measure ${esc(tilde(curDu))}</button><div style="margin-top:8px;font-size:12px">Read-only. macOS may ask once to let your terminal read Desktop, Documents or Downloads.</div>`}</div>`;
+  else {
+    const max = d.items[0]?.size || 1;
+    body = `<div class="muted" style="font-size:12px;margin-bottom:4px">${fmtB(d.total)} in ${esc(tilde(curDu))} · measured ${new Date(d.t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·
+      ${scanning ? "measuring…" : `<button class="btn sm ghost" data-scan="1">Re-measure</button>`}</div>` +
+      (d.items.length ? d.items.slice(0, 14).map(i => `<div class="drow"><span class="dn" data-p="${esc(i.path)}" title="Open ${esc(i.path)}">${esc(i.name)}</span>
+        <span class="bar"><i style="width:${(i.size / max * 100).toFixed(1)}%"></i></span><span class="ds">${fmtB(i.size)}</span>
+        <button class="btn sm ghost" data-r="${esc(i.path)}">Reveal</button></div>`).join("") : `<div class="empty">No subfolders.</div>`);
+  }
+  el.innerHTML = `<div class="crumbs">${crumbs}</div>${body}`;
+  el.onclick = e => {
+    const t = e.target;
+    if (t.closest("[data-scan]")) { act({ kind: "scan", path: curDu }); return; }
+    const r = t.closest("[data-r]"); if (r) { act({ kind: "reveal", path: r.dataset.r }); return; }
+    const p = t.closest("[data-p]"); if (p) { curDu = p.dataset.p; loadDu(curDu); }
+  };
+}
+
+// ── insights: plain-language notes with a one-click fix where one exists ──
+function insights() {
+  const out = [], m = S.mem, apps = S.apps, d = S.docker, ncpu = S.host.cores;
+  const topMem = [...apps].sort((a, b) => b.mem - a.mem).slice(0, 3).map(a => `${a.name} ${fmtB(a.mem)}`).join(", ");
+  const toApps = by => () => { sortBy = by; syncSort(by); renderApps(); $("#apps-card").scrollIntoView({ behavior: "smooth" }); };
+  if (m.pressure_level >= 2) out.push({ sev: m.pressure_level >= 4 ? "critical" : "warning", title: `Memory pressure is ${m.pressure_level >= 4 ? "critical" : "elevated"}`,
+    text: `macOS is short on RAM. Biggest users: ${topMem}.`, acts: [{ label: "Sort apps by memory", go: toApps("mem") }] });
+  if (m.compressed > m.total * 0.25 || m.swap_used > 2 * GB) out.push({ sev: m.swap_used > 8 * GB ? "critical" : "warning",
+    title: `${fmtB(m.compressed)} compressed · ${fmtB(m.swap_used)} in swap`,
+    text: `macOS is squeezing memory to keep apps alive. Quitting an idle app or restarting Docker gives it back fastest. Biggest: ${topMem}.`, acts: [{ label: "Sort apps by memory", go: toApps("mem") }] });
+  const big = cleanables().sort((a, b) => b.size - a.size)[0];
+  if (S.disk.free < 80 * GB) out.push({ sev: S.disk.free < 30 * GB ? "critical" : "warning", title: `Only ${fmtB(S.disk.free)} disk free`,
+    text: big ? `Biggest win: ${big.label} holds ${fmtB(big.size)}.` + (big.safe ? " It rebuilds on its own." : "") : "macOS needs free disk space for swap.",
+    acts: big ? [{ label: "Show what can go", primary: true, go: () => $("#clean-card").scrollIntoView({ behavior: "smooth" }) }] : [] });
+  if (S.orphans.count) out.push({ sev: "info", title: `${S.orphans.count} orphaned dev process${S.orphans.count > 1 ? "es" : ""} (${fmtB(S.orphans.mem)})`,
+    text: "node/python/bun processes whose parent exited. Usually leftovers from crashed agent runs or forgotten dev servers.",
+    acts: [{ label: "Show them", go: () => revealGroup("__orphans__") }] });
+  const vmApp = apps.find(a => a.name === "Docker VM");
+  if (vmApp && d.running) {
+    const ctrMem = d.containers.reduce((a, c) => a + (c.mem || 0), 0);
+    if (vmApp.mem > 2 * GB && vmApp.mem > ctrMem * 2.5) out.push({ sev: "info", title: `Docker's VM holds ${fmtB(vmApp.mem)} of RAM`,
+      text: `Containers only use ${fmtB(ctrMem)}; the rest is Linux cache that Docker gives back slowly. Restarting Docker returns it now.` });
+  }
+  for (const a of apps.filter(a => a.cpu * ncpu / 100 >= 0.9 && a.name !== "Docker VM").slice(0, 2)) out.push({ sev: "info", title: `${a.name} is busy: ≈ ${(a.cpu * ncpu / 100).toFixed(1)} cores`,
+    text: a.own ? `${a.count} process${a.count > 1 ? "es" : ""}, ${fmtB(a.mem)}.` : "A macOS system process. It usually settles on its own.",
+    acts: a.own ? [{ label: "Show processes", go: () => revealGroup(a.name) }] : [] });
+  if (!out.length) out.push({ sev: "good", title: "All clear", text: "Nothing is straining your Mac right now." });
+  const rank = { critical: 0, warning: 1, info: 2, good: 3 };
+  return out.sort((a, b) => rank[a.sev] - rank[b.sev]).slice(0, 6);
+}
+let insightKey = "";
+function renderInsights() {
+  const list = insights();
+  const key = list.map(i => i.title + "|" + i.text).join("\n");
+  if (key === insightKey || pointerDown) return;
+  insightKey = key;
+  const el = $("#insights");
+  el.innerHTML = "";
+  for (const i of list) {
+    const div = document.createElement("div");
+    div.className = "insight";
+    div.innerHTML = `${ICON[i.sev]}<div class="body"><div class="title">${esc(i.title)}</div><div class="text">${esc(i.text)}</div>${i.acts?.length ? '<div class="act"></div>' : ""}</div>`;
+    for (const a of i.acts || []) {
+      const b = document.createElement("button");
+      b.className = "btn sm" + (a.primary ? " primary" : ""); b.textContent = a.label; b.onclick = a.go;
+      $(".act", div).appendChild(b);
+    }
+    el.appendChild(div);
+  }
+}
+
+// ── charts: stacked areas; the time axis grows from launch up to 15 minutes, so the plot always fills ──
+function niceStep(span) { for (const s of [15, 30, 60, 120, 300]) if (span / s <= 5) return s; return 300; }
+function timeDomain() {
+  const now = S.t, first = hist.length ? hist[0][0] : now - 60;
+  return [Math.max(now - WINDOW, Math.min(first, now - 20)), now];
+}
+function stackedChart(host, { series, yMax, yFmt, yTicks, valFmt }) {
+  const svg = $("svg", host), tip = $(".tip", host);
+  const W = host.clientWidth, H = 170, L = 44, R = 6, T = 8, B = 22, iw = W - L - R, ih = H - T - B;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const [t0, now] = timeDomain(), span = now - t0;
+  const x = t => L + (t - t0) / span * iw, y = v => T + ih - Math.min(v / yMax, 1) * ih;
+  let g = `<g class="axis">`;
+  for (const v of yTicks) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${yFmt(v)}</text>`;
+  const step = niceStep(span);
+  for (let a = 0; a <= span + 1; a += step) {
+    const px = x(now - a);
+    if (a && px < L + 14) continue;
+    g += `<text x="${px}" y="${H - 5}" text-anchor="${a === 0 ? "end" : "middle"}">${a === 0 ? "now" : a < 60 ? `−${a}s` : `−${Math.round(a / 60)}m`}</text>`;
+  }
+  g += `<line x1="${L}" x2="${W - R}" y1="${T + ih}" y2="${T + ih}" stroke="var(--axis)"/></g>`;
+  const pts = hist;
+  if (pts.length > 1) {
+    const acc = pts.map(() => 0);
+    const stacked = series.filter(s => !s.overlay).map(s => { const lo = acc.slice(); pts.forEach((p, i) => acc[i] += s.get(p)); return { s, lo, hi: acc.slice() }; });
+    // break the line where samples are far apart (rigtop wasn't running)
+    const runs = []; let start = 0;
+    for (let i = 1; i <= pts.length; i++) if (i === pts.length || pts[i][0] - pts[i - 1][0] > 30) { runs.push([start, i]); start = i; }
+    for (const { s, lo, hi } of stacked) for (const [a, b] of runs) {
+      let top = "", bot = "";
+      for (let i = a; i < b; i++) top += (i === a ? "M" : "L") + x(pts[i][0]).toFixed(1) + "," + y(hi[i]).toFixed(1);
+      for (let i = b - 1; i >= a; i--) bot += "L" + x(pts[i][0]).toFixed(1) + "," + y(lo[i]).toFixed(1);
+      g += `<path d="${top}${bot}Z" fill="${s.color}" fill-opacity=".22"/><path d="${top}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
+    }
+    for (const s of series.filter(s => s.overlay)) for (const [a, b] of runs) {
+      let d = ""; for (let i = a; i < b; i++) d += (i === a ? "M" : "L") + x(pts[i][0]).toFixed(1) + "," + y(s.get(pts[i])).toFixed(1);
+      g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-dasharray="5 3" stroke-linejoin="round"/>`;
+    }
+  } else g += `<text x="${L + iw / 2}" y="${T + ih / 2}" text-anchor="middle" fill="var(--muted)" font-size="12">collecting history…</text>`;
+  g += `<g class="hover" style="display:none"><line y1="${T}" y2="${T + ih}" stroke="var(--axis)" stroke-width="1"/></g>`;
+  g += `<rect x="${L}" y="${T}" width="${iw}" height="${ih}" fill="transparent" class="hit"/>`;
+  svg.innerHTML = g;
+  const hv = $(".hover", svg), hit = $(".hit", svg);
+  hit.onpointermove = e => {
+    if (pts.length < 2) return;
+    const r = svg.getBoundingClientRect(), tt = t0 + (e.clientX - r.left - L) / iw * span;
+    let i = 0, best = Infinity; pts.forEach((p, k) => { const dd = Math.abs(p[0] - tt); if (dd < best) { best = dd; i = k; } });
+    const p = pts[i], px = x(p[0]);
+    hv.style.display = ""; hv.firstChild.setAttribute("x1", px); hv.firstChild.setAttribute("x2", px);
+    hv.querySelectorAll("circle").forEach(c => c.remove());
+    let a = 0;
+    for (const s of series) {
+      const v = s.get(p), yy = s.overlay ? y(v) : y(a += v);
+      hv.insertAdjacentHTML("beforeend", `<circle cx="${px}" cy="${yy}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`);
+    }
+    const ago = Math.round(S.t - p[0]);
+    tip.innerHTML = `<div class="t">${new Date(p[0] * 1000).toLocaleTimeString()} · ${ago < 5 ? "now" : ago < 90 ? ago + "s ago" : Math.round(ago / 60) + "m ago"}</div>` +
+      series.map(s => `<div class="r"><span><i style="background:${s.color}"></i>${s.name}</span><b class="num">${valFmt(s.get(p))}</b></div>`).join("");
+    tip.style.opacity = 1;
+    const tw = tip.offsetWidth; tip.style.left = (px + 12 + tw > W ? px - tw - 12 : px + 12) + "px"; tip.style.top = "6px";
+  };
+  hit.onpointerleave = () => { hv.style.display = "none"; tip.style.opacity = 0; };
+}
+function renderCharts() {
+  if (!S) return;
+  const [t0, now] = timeDomain(), mins = Math.round((now - t0) / 60);
+  const span = mins >= 15 ? "last 15 minutes" : mins >= 2 ? `last ${mins} minutes` : "since rigtop started";
+  $("#cpu-chart-title").textContent = "CPU · " + span; $("#mem-chart-title").textContent = "Memory · " + span;
+  stackedChart($("#cpu-chart"), {
+    series: [{ name: "User", color: "var(--s1)", get: p => p[1] }, { name: "System", color: "var(--s2)", get: p => p[2] }],
+    yMax: 100, yTicks: [0, 25, 50, 75, 100], yFmt: v => v + "%", valFmt: v => v.toFixed(1) + "%",
+  });
+  const tot = S.host.mem_total / GB;
+  const step = tot > 48 ? 16 : 8, ticks = []; for (let v = 0; v <= tot + 0.01; v += step) ticks.push(v);
+  stackedChart($("#mem-chart"), {
+    series: [{ name: "App", color: "var(--s1)", get: p => p[3] }, { name: "Wired", color: "var(--s2)", get: p => p[4] },
+             { name: "Compressed", color: "var(--s3)", get: p => p[5] }, { name: "Swap (disk)", color: "var(--s4)", get: p => p[7], overlay: true }],
+    yMax: tot, yTicks: ticks, yFmt: v => v + " GB", valFmt: v => v.toFixed(1) + " GB",
+  });
+  const st = $("#pr-strip"), W = st.clientWidth || 300, span2 = now - t0;
+  st.setAttribute("viewBox", `0 0 ${W} 10`);
+  let g = `<rect width="${W}" height="10" rx="3" fill="var(--track)"/>`;
+  for (let i = 0; i < hist.length; i++) {
+    const p = hist[i], n = hist[i + 1], x0 = (p[0] - t0) / span2 * W, x1 = n && n[0] - p[0] < 30 ? (n[0] - t0) / span2 * W : x0 + 2;
+    g += `<rect x="${x0.toFixed(1)}" width="${Math.max(x1 - x0, 1).toFixed(1)}" height="10" fill="${(PRESSURE[p[8]] || PRESSURE[1])[2]}"/>`;
+  }
+  st.innerHTML = g;
+  const [k, w] = PRESSURE[S.mem.pressure_level] || PRESSURE[1];
+  $("#pr-strip-now").innerHTML = `<span class="status" style="font-weight:600;gap:5px">${ICON[k].replace("<svg", '<svg width="14" height="14"')}${w}</span>`;
+}
+new ResizeObserver(() => renderCharts()).observe($("#cpu-chart"));
+
+// ── apps table (keyed rows so hover and clicks survive refreshes) ──
+const rows = new Map();
+function appRows() {
+  let list = S.apps.filter(a => !filter || a.name.toLowerCase().includes(filter));
+  if (S.orphans.count && (!filter || "orphaned dev processes".includes(filter)))
+    list = [...list, { name: "__orphans__", label: "Orphaned dev processes", count: S.orphans.count, cpu: S.orphans.cpu, mem: S.orphans.mem, own: true, orphans: true }];
+  return list.sort((a, b) => sortBy === "mem" ? b.mem - a.mem : b.cpu - a.cpu || b.mem - a.mem);
+}
+function renderApps() {
+  if (!S) return;
+  const ncpu = S.host.cores;
+  let list = appRows();
+  const limit = showAll || filter ? list.length : 15;
+  $("#more").hidden = list.length <= 15 || !!filter;
+  $("#more").textContent = showAll ? "Show fewer" : `Show all ${list.length}`;
+  list = list.slice(0, limit);
+  const maxCpu = Math.max(...list.map(a => a.cpu), 5), maxMem = Math.max(...list.map(a => a.mem), GB);
+  const body = $("#apps"), seen = new Set();
+  for (const a of list) {
+    seen.add(a.name);
+    let r = rows.get(a.name);
+    if (!r) {
+      const tr = document.createElement("tr"); tr.className = "row";
+      tr.innerHTML = `<td><div class="name">${CHEV}<span class="n"></span><span class="badge"></span></div></td>
+        <td class="col-cpu"><div class="barcell"><div class="bar"><i style="background:var(--s1)"></i></div><span class="v"></span></div></td>
+        <td class="col-mem"><div class="barcell"><div class="bar"><i style="background:var(--s3)"></i></div><span class="v"></span></div></td>
+        <td class="col-act"></td>`;
+      $(".n", tr).textContent = a.label || a.name;
+      tr.onclick = e => { if (e.target.closest("button")) return; toggleGroup(a.name); };
+      const detail = document.createElement("tr"); detail.className = "detail"; detail.hidden = true;
+      detail.innerHTML = `<td colspan="4"><div class="procs"><div class="empty">Loading…</div></div></td>`;
+      r = { tr, detail }; rows.set(a.name, r);
+    }
+    const { tr } = r, cells = tr.querySelectorAll(".barcell");
+    $(".badge", tr).textContent = a.orphans ? "parent exited" : a.count > 1 ? `${a.count} processes` : a.own ? "1 process" : "system";
+    cells[0].querySelector("i").style.width = (a.cpu / maxCpu * 100) + "%";
+    cells[0].querySelector(".v").textContent = fmtPct(a.cpu);
+    cells[0].title = `≈ ${(a.cpu * ncpu / 100).toFixed(2)} cores`;
+    cells[1].querySelector("i").style.width = (a.mem / maxMem * 100) + "%";
+    cells[1].querySelector(".v").textContent = fmtB(a.mem);
+    const spec = a.orphans ? { label: "End all", armed: `End ${a.count}?`, run: b => act({ kind: "orphans" }, b) } : appAction(a);
+    setAction($(".col-act", tr), spec.note !== undefined ? null : spec, a.name === "Docker VM" && busy("docker:desktop-restart"));
+    tr.classList.toggle("open", open.has(a.name));
+    r.detail.hidden = !open.has(a.name);
+    body.appendChild(tr); body.appendChild(r.detail);
+  }
+  for (const [name, r] of rows) if (!seen.has(name)) { r.tr.remove(); r.detail.remove(); if (name !== "__orphans__" && !S.apps.some(a => a.name === name)) { rows.delete(name); open.delete(name); } }
+}
+async function loadProcs(name) {
+  try {
+    const procs = await (await fetch("/api/procs?group=" + encodeURIComponent(name))).json();
+    open.set(name, procs); drawProcs(name);
+  } catch {}
+}
+function toggleGroup(name) {
+  if (open.has(name)) open.delete(name); else { open.set(name, null); loadProcs(name); }
+  renderApps();
+}
+function revealGroup(name) {
+  filter = ""; $("#search").value = ""; showAll = true;
+  if (!open.has(name)) { open.set(name, null); loadProcs(name); }
+  renderApps();
+  rows.get(name)?.tr.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function refreshOpenGroups() { if (!pointerDown) for (const name of open.keys()) loadProcs(name); }
+function drawProcs(name) {
+  const r = rows.get(name), procs = open.get(name);
+  if (!r || !procs) return;
+  const box = $(".procs", r.detail);
+  if (!procs.length) { box.innerHTML = `<div class="empty">No processes found (they may have exited).</div>`; return; }
+  keyed(box, procs.map(p => ({ key: String(p.pid), p })), () => {
+    const el = document.createElement("div"); el.className = "proc";
+    el.innerHTML = `<span class="mono muted"></span><span class="args mono"></span><span class="pc num ink2"></span><span class="pm num ink2"></span><span class="acts"><span class="a1"></span><span class="a2"></span></span>`;
+    return el;
+  }, (el, { p }) => {
+    el.children[0].textContent = p.pid;
+    el.children[1].textContent = p.args; el.children[1].title = p.args;
+    el.children[2].textContent = fmtPct(p.cpu); el.children[2].title = p.cores.toFixed(2) + " cores";
+    el.children[3].textContent = fmtB(p.mem);
+    const payload = how => ({ kind: "process", action: how, pid: p.pid, path: p.path });
+    setAction($(".a1", el), p.own ? { label: "Quit", armed: "Quit?", run: b => act(payload("term"), b).then(() => loadProcs(name)) } : { note: "system" });
+    setAction($(".a2", el), p.own ? { label: "Force", armed: "Kill?", cls: "danger", run: b => act(payload("kill"), b).then(() => loadProcs(name)) } : null);
+  });
+}
+
+// ── actions ──
+function confirmDialog({ title, body, cmd, danger, ok = "Confirm" }) {
+  return new Promise(res => {
+    const d = $("#confirm");
+    $("#c-title").textContent = title; $("#c-body").textContent = body; $("#c-cmd").textContent = cmd || "";
+    $("#c-cmd").hidden = !cmd;
+    const okb = $("#c-ok"); okb.textContent = ok; okb.className = "btn " + (danger ? "solid-danger" : "primary");
+    const done = v => { d.close(); okb.onclick = $("#c-cancel").onclick = d.oncancel = null; res(v); };
+    okb.onclick = () => done(true); $("#c-cancel").onclick = () => done(false); d.oncancel = () => done(false);
+    d.showModal(); $("#c-cancel").focus();
+  });
+}
+function toast(msg, ok = true, html = false) {
+  const t = document.createElement("div"); t.className = "toast" + (ok ? "" : " bad");
+  if (html) t.innerHTML = msg; else t.textContent = msg;
+  $("#toasts").appendChild(t); setTimeout(() => t.remove(), ok ? 6000 : 10000);
+}
+async function act(payload, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
+  try {
+    const r = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-Rigtop-Token": TOKEN }, body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (!j.job || !j.ok) toast(j.message || (j.ok ? "Done" : "Failed"), j.ok);   // jobs report when they finish
+    return j.ok;
+  } catch (e) { toast("Request failed: " + e.message, false); return false; }
+  finally {
+    if (btn) { btn.disabled = false; btn.textContent = btn._spec?.label || btn.textContent; }
+    schedule(400);
+  }
+}
+const ctrAction = (verb, list, btn) => act({ kind: "container", action: verb, ids: list.map(c => c.id) }, btn);
+
+const DISK = [
+  { key: "build_cache", label: "Build cache", hint: "Layers Docker keeps to speed up builds. Safe to clear; builds that need them will rebuild.",
+    actions: [{ id: "builder-prune-old", label: "Clear older than 24h" }, { id: "builder-prune-all", label: "Clear all" }] },
+  { key: "images", label: "Images", hint: "Images that no container uses count as reclaimable.",
+    actions: [{ id: "image-prune-dangling", label: "Remove dangling" },
+              { id: "image-prune-unused", label: "Remove unused", danger: true, cmd: "docker image prune -af", body: "Removes every image that no container (running or stopped) uses. They'll be pulled again when needed." }] },
+  { key: "volumes", label: "Volumes", hint: "Volumes keep container data, such as databases. Unused ones may still hold data from old projects.",
+    actions: [{ id: "volume-prune", label: "Remove anonymous" },
+              { id: "volume-prune-all", label: "Remove all unused", danger: true, cmd: "docker volume prune -af", body: "Permanently deletes every volume not attached to a container, including named volumes with database data from stopped projects. This can't be undone." }] },
+  { key: "containers", label: "Containers", hint: "Files containers have written. Only stopped containers can be removed to reclaim it.",
+    actions: [{ id: "container-prune", label: "Remove stopped" }] },
+];
+// safe docker cleanups are two-tap; anything that can lose data opens a dialog showing the exact command
+function dockerSpec(a) {
+  const run = b => act({ kind: "docker", action: a.id }, b);
+  return a.danger ? { label: a.label, cls: "danger", run, dialog: { title: a.label + "?", body: a.body, cmd: a.cmd, danger: true, ok: a.label } }
+                  : { label: a.label, armed: "Sure?", run };
+}
+
+let dockerKey = "", diskKey = "", overDocker = false;
+$("#docker-section").addEventListener("pointerenter", () => overDocker = true);
+$("#docker-section").addEventListener("pointerleave", () => { overDocker = false; if (S) renderDocker(); });
+function renderDocker() {
+  // hold still while the pointer is over the panel so buttons never move under the cursor
+  const d = S.docker, jobsKey = S.jobs.filter(j => j.state === "running" && j.key.startsWith("docker")).map(j => j.key).join();
+  const key = JSON.stringify([d.t, d.df_t, d.running, d.error, jobsKey]);
+  if (key === dockerKey || pointerDown || overDocker) return;
+  dockerKey = key;
+  const rowsEl = $("#disk-rows"), ctrEl = $("#containers");
+  if (!d.available || !d.running) {
+    const msg = !d.available ? "Docker isn't installed." : d.error ? `Docker isn't running. <span class="muted">(${esc(d.error)})</span>` : "Checking Docker…";
+    diskKey = ""; rowsEl.innerHTML = ctrEl.innerHTML = `<div class="empty">${msg}</div>`; $("#vmline").innerHTML = ""; $("#df-age").textContent = ""; return;
+  }
+  const df = d.df;
+  $("#df-age").textContent = d.df_t ? "updated " + new Date(d.df_t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  if (!df) rowsEl.innerHTML = `<div class="empty">Measuring disk usage…</div>`;
+  else if (diskKey !== JSON.stringify([df, jobsKey])) {
+    diskKey = JSON.stringify([df, jobsKey]);
+    rowsEl.innerHTML = "";
+    for (const k of DISK) {
+      const r = df[k.key]; if (!r) continue;
+      const pct = r.size ? r.reclaimable / r.size : 0;
+      const div = document.createElement("div"); div.className = "disk-row";
+      div.innerHTML = `<div class="top"><b>${k.label}</b><span class="num">${fmtB(r.size)}</span>
+          <span class="muted num" style="font-size:12px">${r.reclaimable > 0 ? fmtB(r.reclaimable) + " reclaimable" : "nothing to reclaim"} · ${r.count} item${r.count === 1 ? "" : "s"}${r.active ? `, ${r.active} in use` : ""}</span></div>
+        <div class="acts"></div>
+        <div class="meter" title="${fmtB(r.reclaimable)} reclaimable of ${fmtB(r.size)}">
+          <i style="flex:${pct};background:var(--s1)"></i><i style="flex:${1 - pct};background:var(--track)"></i></div>
+        <div class="hint">${k.hint}</div>`;
+      for (const a of k.actions) {
+        const slot = document.createElement("span"); $(".acts", div).appendChild(slot);
+        setAction(slot, dockerSpec(a), busy("docker:" + a.id));
+        if (!r.reclaimable && a.id !== "builder-prune-old") slot.querySelector("button").disabled = true;
+      }
+      rowsEl.appendChild(div);
+    }
+    rowsEl.insertAdjacentHTML("beforeend", `<div class="legend" style="margin-top:10px"><span><i style="background:var(--s1)"></i>Reclaimable</span><span><i style="background:var(--track)"></i>In use</span></div>`);
+  }
+
+  const vm = S.apps.find(a => a.name === "Docker VM"), cs = d.containers;
+  const running = cs.filter(c => c.state === "running");
+  const ctrMem = running.reduce((a, c) => a + c.mem, 0), ctrCpu = running.reduce((a, c) => a + c.cpu, 0);
+  $("#vmline").innerHTML = [
+    vm ? `VM uses <b>${fmtB(vm.mem)}</b> of your Mac's RAM` : "",
+    d.vm ? `limit <b>${fmtB(d.vm.mem_limit)}</b> · ${d.vm.cpus} CPUs` : "",
+    `containers <b>${fmtB(ctrMem)}</b> · <b>${ctrCpu.toFixed(0)}%</b> CPU`,
+  ].filter(Boolean).map(s => `<span>${s}</span>`).join("") + `<span class="spacer"></span><span id="vm-restart"></span>`;
+  setAction($("#vm-restart"), dockerRestartSpec("Restart Docker"), busy("docker:desktop-restart"));
+  const stopped = cs.filter(c => c.state !== "running");
+  const pb = $("#prune-stopped"); pb.hidden = !stopped.length; pb.textContent = `Remove ${stopped.length} stopped`;
+  pb.onclick = () => act({ kind: "docker", action: "container-prune" }, pb);
+  if (!cs.length) { ctrEl.innerHTML = `<div class="empty">No containers.</div>`; return; }
+  const groups = new Map();
+  for (const c of cs) { const k = c.project || "—"; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); }
+  const order = [...groups.entries()].sort((a, b) => b[1].filter(c => c.state === "running").length - a[1].filter(c => c.state === "running").length || a[0].localeCompare(b[0]));
+  ctrEl.innerHTML = "";
+  for (const [proj, list] of order) {
+    const up = list.filter(c => c.state === "running"), down = list.filter(c => c.state !== "running");
+    const box = document.createElement("div"); box.className = "proj";
+    box.innerHTML = `<div class="proj-head"><b>${esc(proj === "—" ? "Standalone containers" : proj)}</b>
+        <span class="muted num" style="font-size:12px">${up.length}/${list.length} running${up.length ? ` · ${fmtB(up.reduce((a, c) => a + c.mem, 0))} · ${up.reduce((a, c) => a + c.cpu, 0).toFixed(0)}% CPU` : ""}</span>
+        <span class="spacer"></span><span class="pacts" style="display:flex;gap:4px"></span></div>`;
+    const slot = () => { const s = document.createElement("span"); $(".pacts", box).appendChild(s); return s; };
+    if (up.length > 1) setAction(slot(), { label: "Stop all", armed: `Stop ${up.length}?`, run: b => ctrAction("stop", up, b) });
+    if (down.length > 1 && !up.length) setAction(slot(), { label: "Start all", armed: "Start?", run: b => ctrAction("start", down, b) });
+    for (const c of list) {
+      const isUp = c.state === "running";
+      const row = document.createElement("div"); row.className = "ctr";
+      row.innerHTML = `<span class="sdot" style="background:${isUp ? "var(--good)" : "var(--axis)"}" title="${esc(c.state)}"></span>
+        <span class="nm" title="${esc(c.name)} — ${esc(c.status)}">${esc(c.name)}<div class="muted" style="font-size:11.5px;font-weight:400">${esc(c.status)}</div></span>
+        <span class="im" title="${esc(c.image)}">${esc(c.image)}</span>
+        <span class="num ink2">${isUp ? c.cpu.toFixed(1) + "%" : ""}</span>
+        <span class="num ink2 cm">${isUp ? fmtB(c.mem) : ""}</span>
+        <span class="acts"><span></span><span></span></span>`;
+      const [s1, s2] = row.querySelectorAll(".acts > span");
+      if (isUp) { setAction(s1, { label: "Restart", armed: "Restart?", cls: "ghost", run: b => ctrAction("restart", [c], b) }); setAction(s2, { label: "Stop", armed: "Stop?", run: b => ctrAction("stop", [c], b) }); }
+      else { setAction(s1, { label: "Start", armed: "Start?", run: b => ctrAction("start", [c], b) }); setAction(s2, { label: "Remove", armed: "Remove?", cls: "danger", run: b => ctrAction("rm", [c], b) }); }
+      box.appendChild(row);
+    }
+    ctrEl.appendChild(box);
+  }
+}
+
+schedule(0);
+</script>
+</body>
+</html>
