@@ -6,7 +6,7 @@ A live terminal status line and a local web dashboard showing what's straining y
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue) ![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue) ![platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)
 
 ```bash
-git clone https://github.com/alonstech-org/rigtop && cd rigtop && ./rigtop
+git clone https://github.com/alonstech/rigtop && cd rigtop && ./rigtop
 ```
 
 No install, no `pip`, no Homebrew. One Python file and one HTML file.
@@ -31,7 +31,7 @@ rigtop puts the picture and the fix on one screen. You see what's wrong and fix 
 ## Quick start
 
 ```bash
-git clone https://github.com/alonstech-org/rigtop
+git clone https://github.com/alonstech/rigtop
 cd rigtop
 ./rigtop
 ```

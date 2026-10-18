@@ -15,7 +15,7 @@ If you're planning something bigger, open an issue first so we can agree on the 
 ## Development setup
 
 ```bash
-git clone https://github.com/alonstech-org/rigtop && cd rigtop
+git clone https://github.com/alonstech/rigtop && cd rigtop
 ./rigtop --no-open        # then open http://127.0.0.1:7777
 ```
 
