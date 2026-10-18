@@ -6,7 +6,7 @@ Thanks for wanting to help! rigtop is deliberately small: one Python file, one H
 
 - **Report a bug or an odd number.** Open an issue with your OS version, chip, the output of `./rigtop --once`, and what you expected to see.
 - **Add a cache location** a tool on your machine fills up. This is usually a 5-line change; see below.
-- **Port it to Linux or Windows.** This is the biggest open item; see [Adding a platform](#adding-a-platform).
+- **Port it to Windows**, or report how the Linux backend does on your distro and desktop; see [Adding a platform](#adding-a-platform).
 - **Improve the dashboard:** layout, accessibility, clearer wording.
 - **Improve the docs**, or fix something that confused you.
 
@@ -23,26 +23,28 @@ git clone https://github.com/alonstech/rigtop && cd rigtop
 - **Server changes** (`rigtop.py`): stop with Ctrl+C and start again.
 - `./rigtop --once` prints a text snapshot. It's the quickest way to check the collectors.
 - `./rigtop --demo` serves made-up data, and every button is a no-op. Use it for UI work you don't want touching your real processes, and **for any screenshot you post** (real ones show your hostname, command lines and container names).
-- Run `python3 -m py_compile rigtop.py` before sending a PR. The code must run on **Python 3.9** (the version macOS ships), so avoid `match`, `X | Y` type unions and other newer syntax.
+- Run `python3 -m py_compile rigtop.py` and `python3 -m unittest discover -s tests` before sending a PR. The code must run on **Python 3.9** (the version macOS ships), so avoid `match`, `X | Y` type unions and other newer syntax.
 
 ## How it fits together
 
 ```
-rigtop            sh launcher: picks macOS's /usr/bin/python3, falls back to python3
+rigtop            sh launcher: picks the system /usr/bin/python3, falls back to python3
 rigtop.py         collectors, cleanup jobs, HTTP server and terminal line (one file, in sections)
 dashboard.html    the whole UI: vanilla JS + inline SVG charts, no build step, no CDN
+tests/            unittest suite for the pure helpers (fixtures only, runs on any OS)
 ```
 
 `rigtop.py`, top to bottom:
 
 | Section | What it does |
 |---|---|
-| **kernel stats (ctypes)** | `cpu_ticks()` (per-core ticks), `vm_stats()` (VM page counts), `sysctl_*`. The Mac-specific layer |
+| **kernel stats: macOS (ctypes)** | `cpu_ticks()` (per-core ticks), `vm_stats()` (VM page counts), `sysctl_*` |
+| **kernel stats: Linux (/proc)** | `parse_proc_stat_cpus()`, `parse_kv()`, `parse_psi()`, `linux_memory()`, `linux_proc_path()`: pure parsers fed from `/proc` |
 | **helpers** | `run()` for subprocesses, `du_k()` for sizes at background priority, `empty_dir()` the guarded cache cleaner |
 | **`CACHE_TARGETS`** | The allow-list of cache folders rigtop may empty |
-| **`group_of()` / `ALIASES`** | Turn a process path into an app name ("Google Chrome Helper (Renderer)" → "Google Chrome") |
+| **`group_of()` / `ALIASES`** | Turn a process path into an app name ("Google Chrome Helper (Renderer)" → "Google Chrome"). Linux: `group_of_linux()`, `LINUX_ALIASES` and `linux_is_system()`, which also use the process's cgroup |
 | **`Jobs`** | Runs long cleanups and scans off the request thread; the UI polls their state |
-| **`Monitor`** | Sampling loops: `loop()` (CPU/memory/processes), `docker_loop()`, `cache_loop()` |
+| **`Monitor`** | Sampling loops: `loop()` (CPU/memory/processes), `docker_loop()`, `cache_loop()`. Per-platform readers: `_mem_mac()` / `_mem_linux()`, `_ps_mac()` / `_ps_linux()` |
 | **actions** | `do_action()`: every state-changing operation, each strictly validated |
 | **http** | A tiny `http.server` handler with token and Host checks |
 | **terminal** | The live status line and `--once` |
@@ -92,26 +94,26 @@ It shows up in the dashboard automatically once the folder exists and holds more
 
 ### Recognise a new app or agent
 
-Add its executable name to `ALIASES` (for example `"aider": "Aider"`). If it's an interpreter or dev server that agents tend to leave behind, add it to `DEV_RUNTIME` so orphaned copies are detected. If it's an agent or terminal that sits idle while waiting for input, add it to the `busyLooking` pattern in `dashboard.html` so it's never suggested as an idle app to quit.
+Add its executable name to `ALIASES` (for example `"aider": "Aider"`), or to `LINUX_ALIASES` for a Linux-only name such as `"chrome"`. If it's an interpreter or dev server that agents tend to leave behind, add it to `DEV_RUNTIME` so orphaned copies are detected. If it's an agent or terminal that sits idle while waiting for input, add it to the `busyLooking` pattern in `dashboard.html` so it's never suggested as an idle app to quit. On Linux, if it's a desktop service the session can't live without, add it to `LINUX_SYSTEM_NAMES`.
 
 ### Adding a platform
 
-All of the Mac-specific code is in a few places:
+rigtop runs on macOS and Linux. Platform code is selected with `IS_MAC` / `IS_LINUX`, and kept to a few places:
 
-- `cpu_ticks()`, `vm_stats()`, `sysctl_*` and the memory mapping in `Monitor.sample()`
-- `disk_usage()`, which uses `DATA_VOLUME`
-- `BG` (`taskpolicy -b`)
-- `osascript` (quit app, empty Trash) and `open -R` (reveal)
-- the cache paths under `~/Library`
-- the Docker VM detection in `group_of()`
+- kernel stats: the macOS ctypes section and the Linux `/proc` section, used by `Monitor.sample()` through `_mem_mac()` / `_mem_linux()`
+- the process list: `_ps_mac()` (`ps`) and `_ps_linux()` (`/proc`), both returning `(pid, ppid, uid, %cpu, rss, path, cgroup)` rows, plus `proc_owner()` for the pid-reuse guard
+- grouping and "is this a system process": `group_of()` / `SYSTEM_PATH` and `group_of_linux()` / `linux_is_system()`
+- `DATA_VOLUME`, `BG`, `APP_CACHES` / `_c()` (cache paths), `TRASH`
+- the actions that call OS tools: Trash (`osascript` / `gio`), Reveal (`open -R` / `reveal_linux()`) and Quit (`osascript`, macOS only)
+- dashboard wording: `OS()`, `MACHINE()` and `WIRED()` in `dashboard.html`, driven by `host.platform`
 
-The plan is to move these behind a small backend interface, so `rigtop.py` picks `backend_macos` or `backend_linux` at startup. A Linux backend needs to produce the same `mem` dict (`total, app, wired, compressed, cached, used, free, pressure_level, free_pct, swap_*`) from `/proc/stat`, `/proc/meminfo` and `/proc/pressure/memory`. It should use `ionice -c3 nice -n19` for background work, `xdg-open` to reveal files, `~/.cache` for caches, and `~/.local/share/Trash` for the Trash. Please open an issue before starting, so we can agree the interface first.
+Any new platform must produce the same `mem` dict (`total, app, wired, compressed, cached, used, free, pressure_level, free_pct, swap_*`) and the same process rows, so the dashboard needs nothing beyond wording. Windows is the open one: Docker Desktop runs in WSL2 there. Please open an issue before starting, so we can agree the approach first.
 
 ## Testing your change
 
-There's no automated test suite yet. A small `unittest` suite for the pure helpers (`parse_size`, `group_of`, `under_home`, the action validation in `do_action`) would be a very welcome first PR. Until then, please check by hand:
+`tests/` holds a small `unittest` suite for the pure helpers (the Linux parsers, `group_of` / `group_of_linux`, `parse_size`, `under_home`). It uses fixtures, so it runs on either OS. Tests for the action validation in `do_action` would be a welcome next PR. Then check by hand:
 
-- [ ] `python3 -m py_compile rigtop.py` passes on Python 3.9.
+- [ ] `python3 -m py_compile rigtop.py` and `python3 -m unittest discover -s tests` pass on Python 3.9 (`uv run --no-project --python 3.9 …` is a quick way to get one).
 - [ ] `./rigtop --once` prints sensible numbers.
 - [ ] The dashboard loads with no errors in the browser console, in light and dark mode, and at a narrow (phone) width.
 - [ ] For a new endpoint or action: rejected without the key (`curl localhost:7777/api/state` returns 401; `curl -X POST localhost:7777/api/action -d '{}'` returns 403) and rejected with bad input.

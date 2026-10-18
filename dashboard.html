@@ -342,7 +342,7 @@ dialog .row { display: flex; justify-content: flex-end; gap: 8px; }
     </div>
     <div class="card">
       <div class="card-head"><h2 id="mem-chart-title">Memory</h2><span class="spacer"></span>
-        <div class="legend"><span><i style="background:var(--s1)"></i>App</span><span><i style="background:var(--s2)"></i>Wired</span><span><i style="background:var(--s3)"></i>Compressed</span><span><i style="background:var(--s4)"></i>Swap</span></div></div>
+        <div class="legend"><span><i style="background:var(--s1)"></i>App</span><span data-wired><i style="background:var(--s2)"></i>Wired</span><span><i style="background:var(--s3)"></i>Compressed</span><span><i style="background:var(--s4)"></i>Swap</span></div></div>
       <div class="chart" id="mem-chart"><svg height="170"></svg><div class="tip"></div></div>
       <div class="strip"><span>Pressure</span><svg id="pr-strip" preserveAspectRatio="none"></svg><span id="pr-strip-now"></span></div>
     </div>
@@ -350,7 +350,7 @@ dialog .row { display: flex; justify-content: flex-end; gap: 8px; }
 
   <section class="card" id="apps-card">
     <div class="card-head">
-      <h2>What's using your Mac</h2>
+      <h2 id="apps-title">What's using your Mac</h2>
       <span class="muted" style="font-size:12px">grouped by app · CPU is % of the whole machine · click a row for its processes</span>
       <span class="spacer"></span>
       <input class="search" id="search" placeholder="Filter apps…" autocomplete="off">
@@ -426,6 +426,9 @@ const ICON = {
 };
 const CHEV = '<svg class="chev" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const PRESSURE = { 1: ["good", "Normal", "var(--good)"], 2: ["warning", "Elevated", "var(--warn)"], 4: ["critical", "Critical", "var(--crit)"] };
+// a few words differ between macOS and Linux; demo mode sends no platform, so it reads as macOS
+const linux = () => S?.host.platform === "linux";
+const OS = () => linux() ? "Linux" : "macOS", MACHINE = () => linux() ? "computer" : "Mac", WIRED = () => linux() ? "Kernel" : "Wired";
 
 // ── state ──
 let S = null, hist = [], lastT = 0, every = store.get("every", 3), timer = null, fails = 0, signedOut = !KEY;
@@ -558,13 +561,15 @@ function appAction(a) {
 }
 function dockerRestartSpec(label = "Restart") {
   return { label, run: b => act({ kind: "docker", action: "desktop-restart" }, b),
-    dialog: { title: "Restart Docker Desktop?", body: "Restarts the Docker VM so macOS gets its cached memory back. Running containers stop; those with a restart policy come back by themselves, the rest you can start again from the Containers panel.", cmd: "docker desktop restart", ok: "Restart Docker" } };
+    dialog: { title: "Restart Docker Desktop?", body: `Restarts the Docker VM so ${OS()} gets its cached memory back. Running containers stop; those with a restart policy come back by themselves, the rest you can start again from the Containers panel.`, cmd: "docker desktop restart", ok: "Restart Docker" } };
 }
 
 // ── render ──
 function render() {
   const h = S.host;
   $("#hostline").textContent = `${h.name} · ${h.chip} · ${h.cores} cores · ${Math.round(h.mem_total / GB)} GB · ${h.os}`;
+  $("#apps-title").textContent = `What's using your ${MACHINE()}`;
+  document.querySelectorAll("[data-wired]").forEach(el => el.lastChild.textContent = WIRED());
   renderJobs(); renderTiles(); renderInsights(); renderCleanup(); renderCharts();
   if (!pointerDown) renderApps();
   renderDocker();
@@ -609,7 +614,7 @@ function renderTiles() {
     action: appAction(a), busy: a.name === "Docker VM" && busy("docker:desktop-restart") })), "Waiting for process data…");
 
   $("#mem-hero").innerHTML = `${(m.used / GB).toFixed(1)}<small>of ${Math.round(m.total / GB)} GB</small>`;
-  const parts = [["App", m.app, "var(--s1)"], ["Wired", m.wired, "var(--s2)"], ["Compressed", m.compressed, "var(--s3)"], ["Cached", m.cached, "var(--s4)"]];
+  const parts = [["App", m.app, "var(--s1)"], [WIRED(), m.wired, "var(--s2)"], ["Compressed", m.compressed, "var(--s3)"], ["Cached", m.cached, "var(--s4)"]];
   const bar = $("#mem-bar");
   if (!bar.children.length) bar.innerHTML = parts.map(p => `<span style="background:${p[2]}"></span>`).join("") + '<span style="background:var(--track);flex:1"></span>';
   parts.forEach((p, i) => { bar.children[i].style.flexBasis = (p[1] / m.total * 100) + "%"; bar.children[i].title = `${p[0]}: ${fmtB(p[1])}`; });
@@ -624,7 +629,7 @@ function renderTiles() {
   if (vm && vm.mem > 1.5 * GB && S.docker.running) rec.push({ key: "dockervm", name: "Docker VM cache", value: fmtB(vm.mem),
     onName: () => $("#docker-section").scrollIntoView({ behavior: "smooth" }), action: dockerRestartSpec(), busy: busy("docker:desktop-restart") });
   // agents waiting for your input and terminals look idle but aren't, so they're never suggested here
-  const busyLooking = /claude|codex|gemini|cursor|antigravity|windsurf|terminal|iterm|warp|ghostty|kitty|alacritty|wezterm|code|zed|docker/i;
+  const busyLooking = /claude|codex|gemini|cursor|antigravity|windsurf|terminal|iterm|warp|ghostty|kitty|alacritty|wezterm|konsole|ptyxis|tilix|terminator|xterm|code|zed|docker/i;
   const idle = apps.filter(a => a.cpu < 0.15 && a.mem > 400 * MB && (a.quittable || a.killable) && !busyLooking.test(a.name)).sort((a, b) => b.mem - a.mem).slice(0, Math.max(1, 3 - rec.length));
   for (const a of idle) rec.push({ key: "idle:" + a.name, name: `${a.name} (idle)`, value: fmtB(a.mem), title: `${a.name} is using almost no CPU but holds ${fmtB(a.mem)}`,
     onName: () => revealGroup(a.name), action: appAction(a) });
@@ -689,13 +694,13 @@ function renderCleanup() {
     const rows = [];
     const dev = list.filter(i => i.group === "dev").sort((a, b) => b.size - a.size), app = list.filter(i => i.group === "app");
     if (dev.length) rows.push({ key: "h:dev", head: "Developer caches & Docker" }, ...dev.map(i => ({ key: i.id, it: i })));
-    if (app.length) rows.push({ key: "h:app", head: "App caches (~/Library/Caches)" }, ...app.map(i => ({ key: i.id, it: i })));
+    if (app.length) rows.push({ key: "h:app", head: `App caches (${tilde(c.app_dir || S.home + "/Library/Caches")})` }, ...app.map(i => ({ key: i.id, it: i })));
     rows.push({ key: "h:trash", head: "Trash" }, { key: "trash", trash: true });
     keyed(box, rows, r => {
       const el = document.createElement("div");
       if (r.head) { el.className = "subhead"; el.textContent = r.head; return el; }
       el.className = "crow";
-      el.innerHTML = r.trash ? `<span></span><div class="cl"><b>Empty the Trash</b><div class="h">Permanently deletes what's in the Trash. macOS privacy hides its size from rigtop.</div></div><span class="cs"></span><span class="ca"></span>`
+      el.innerHTML = r.trash ? `<span></span><div class="cl"><b>Empty the Trash</b><div class="h"></div></div><span class="cs"></span><span class="ca"></span>`
         : `<input type="checkbox"><div class="cl"><b></b><div class="h"></div></div><span class="cs"></span><span class="ca"></span>`;
       const cb = $("input", el);
       if (cb) cb.onchange = () => { cb.checked ? selected.add(el.dataset.key) : selected.delete(el.dataset.key); updateSel(); };
@@ -703,8 +708,10 @@ function renderCleanup() {
     }, (el, r) => {
       if (r.head) return;
       if (r.trash) {
+        $(".h", el).textContent = "Permanently deletes what's in the Trash." + (linux() ? "" : " macOS privacy hides its size from rigtop.");
+        $(".cs", el).textContent = c.trash != null ? fmtB(c.trash) : "";
         setAction($(".ca", el), { label: "Empty", cls: "danger", run: b => act({ kind: "trash" }, b),
-          dialog: { title: "Empty the Trash?", body: "Everything in the Trash is deleted permanently. macOS may ask once to let your terminal control Finder.", danger: true, ok: "Empty Trash" } }, busy("trash"));
+          dialog: { title: "Empty the Trash?", body: "Everything in the Trash is deleted permanently." + (linux() ? "" : " macOS may ask once to let your terminal control Finder."), danger: true, ok: "Empty Trash" } }, busy("trash"));
         return;
       }
       const it = r.it;
@@ -747,7 +754,7 @@ function renderExplorer() {
   parts.forEach((p, i) => { if (i > 0) acc += "/" + p; crumbs += (i ? "<span>/</span>" : "") + `<button data-p="${esc(i ? acc : S.home)}">${esc(p)}</button>`; });
   let body;
   if (!d || d.pending) body = `<div class="empty">${scanning ? "Measuring… big folders can take a few minutes. It runs at background priority."
-      : `<button class="btn primary" data-scan="1">Measure ${esc(tilde(curDu))}</button><div style="margin-top:8px;font-size:12px">Read-only. macOS may ask once to let your terminal read Desktop, Documents or Downloads.</div>`}</div>`;
+      : `<button class="btn primary" data-scan="1">Measure ${esc(tilde(curDu))}</button><div style="margin-top:8px;font-size:12px">Read-only.${linux() ? "" : " macOS may ask once to let your terminal read Desktop, Documents or Downloads."}</div>`}</div>`;
   else {
     const max = d.items[0]?.size || 1;
     body = `<div class="muted" style="font-size:12px;margin-bottom:4px">${fmtB(d.total)} in ${esc(tilde(curDu))} · measured ${new Date(d.t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·
@@ -771,13 +778,14 @@ function insights() {
   const topMem = [...apps].sort((a, b) => b.mem - a.mem).slice(0, 3).map(a => `${a.name} ${fmtB(a.mem)}`).join(", ");
   const toApps = by => () => { sortBy = by; syncSort(by); renderApps(); $("#apps-card").scrollIntoView({ behavior: "smooth" }); };
   if (m.pressure_level >= 2) out.push({ sev: m.pressure_level >= 4 ? "critical" : "warning", title: `Memory pressure is ${m.pressure_level >= 4 ? "critical" : "elevated"}`,
-    text: `macOS is short on RAM. Biggest users: ${topMem}.`, acts: [{ label: "Sort apps by memory", go: toApps("mem") }] });
+    text: `${OS()} is short on RAM. Biggest users: ${topMem}.`, acts: [{ label: "Sort apps by memory", go: toApps("mem") }] });
   if (m.compressed > m.total * 0.25 || m.swap_used > 2 * GB) out.push({ sev: m.swap_used > 8 * GB ? "critical" : "warning",
     title: `${fmtB(m.compressed)} compressed · ${fmtB(m.swap_used)} in swap`,
-    text: `macOS is squeezing memory to keep apps alive. Quitting an idle app or restarting Docker gives it back fastest. Biggest: ${topMem}.`, acts: [{ label: "Sort apps by memory", go: toApps("mem") }] });
+    text: (linux() ? "Linux is compressing and swapping memory to keep apps alive. Quitting an idle app gives it back fastest."
+      : "macOS is squeezing memory to keep apps alive. Quitting an idle app or restarting Docker gives it back fastest.") + ` Biggest: ${topMem}.`, acts: [{ label: "Sort apps by memory", go: toApps("mem") }] });
   const big = cleanables().sort((a, b) => b.size - a.size)[0];
   if (S.disk.free < 80 * GB) out.push({ sev: S.disk.free < 30 * GB ? "critical" : "warning", title: `Only ${fmtB(S.disk.free)} disk free`,
-    text: big ? `Biggest win: ${big.label} holds ${fmtB(big.size)}.` + (big.safe ? " It rebuilds on its own." : "") : "macOS needs free disk space for swap.",
+    text: big ? `Biggest win: ${big.label} holds ${fmtB(big.size)}.` + (big.safe ? " It rebuilds on its own." : "") : `${OS()} needs free disk space for swap.`,
     acts: big ? [{ label: "Show what can go", primary: true, go: () => $("#clean-card").scrollIntoView({ behavior: "smooth" }) }] : [] });
   if (S.orphans.count) out.push({ sev: "info", title: `${S.orphans.count} orphaned dev process${S.orphans.count > 1 ? "es" : ""} (${fmtB(S.orphans.mem)})`,
     text: "node/python/bun processes whose parent exited. Usually leftovers from crashed agent runs or forgotten dev servers.",
@@ -789,9 +797,9 @@ function insights() {
       text: `Containers only use ${fmtB(ctrMem)}; the rest is Linux cache that Docker gives back slowly. Restarting Docker returns it now.` });
   }
   for (const a of apps.filter(a => a.cpu * ncpu / 100 >= 0.9 && a.name !== "Docker VM").slice(0, 2)) out.push({ sev: "info", title: `${a.name} is busy: ≈ ${(a.cpu * ncpu / 100).toFixed(1)} cores`,
-    text: a.own ? `${a.count} process${a.count > 1 ? "es" : ""}, ${fmtB(a.mem)}.` : "A macOS system process. It usually settles on its own.",
+    text: a.own ? `${a.count} process${a.count > 1 ? "es" : ""}, ${fmtB(a.mem)}.` : `A ${OS()} system process. It usually settles on its own.`,
     acts: a.own ? [{ label: "Show processes", go: () => revealGroup(a.name) }] : [] });
-  if (!out.length) out.push({ sev: "good", title: "All clear", text: "Nothing is straining your Mac right now." });
+  if (!out.length) out.push({ sev: "good", title: "All clear", text: `Nothing is straining your ${MACHINE()} right now.` });
   const rank = { critical: 0, warning: 1, info: 2, good: 3 };
   return out.sort((a, b) => rank[a.sev] - rank[b.sev]).slice(0, 6);
 }
@@ -891,7 +899,7 @@ function renderCharts() {
   const tot = S.host.mem_total / GB;
   const step = tot > 48 ? 16 : 8, ticks = []; for (let v = 0; v <= tot + 0.01; v += step) ticks.push(v);
   stackedChart($("#mem-chart"), {
-    series: [{ name: "App", color: "var(--s1)", get: p => p[3] }, { name: "Wired", color: "var(--s2)", get: p => p[4] },
+    series: [{ name: "App", color: "var(--s1)", get: p => p[3] }, { name: WIRED(), color: "var(--s2)", get: p => p[4] },
              { name: "Compressed", color: "var(--s3)", get: p => p[5] }, { name: "Swap (disk)", color: "var(--s4)", get: p => p[7], overlay: true }],
     yMax: tot, yTicks: ticks, yFmt: v => v + " GB", valFmt: v => v.toFixed(1) + " GB",
   });
@@ -1088,11 +1096,12 @@ function renderDocker() {
   const running = cs.filter(c => c.state === "running");
   const ctrMem = running.reduce((a, c) => a + c.mem, 0), ctrCpu = running.reduce((a, c) => a + c.cpu, 0);
   $("#vmline").innerHTML = [
-    vm ? `VM uses <b>${fmtB(vm.mem)}</b> of your Mac's RAM` : "",
+    vm ? `VM uses <b>${fmtB(vm.mem)}</b> of your ${MACHINE()}'s RAM` : "",
+    d.can_restart === false ? "Docker Engine: containers run on this machine, no VM" : "",
     d.vm ? `limit <b>${fmtB(d.vm.mem_limit)}</b> · ${d.vm.cpus} CPUs` : "",
     `containers <b>${fmtB(ctrMem)}</b> · <b>${ctrCpu.toFixed(0)}%</b> CPU`,
   ].filter(Boolean).map(s => `<span>${s}</span>`).join("") + `<span class="spacer"></span><span id="vm-restart"></span>`;
-  setAction($("#vm-restart"), dockerRestartSpec("Restart Docker"), busy("docker:desktop-restart"));
+  setAction($("#vm-restart"), d.can_restart === false ? null : dockerRestartSpec("Restart Docker"), busy("docker:desktop-restart"));
   const stopped = cs.filter(c => c.state !== "running");
   const pb = $("#prune-stopped"); pb.hidden = !stopped.length; pb.textContent = `Remove ${stopped.length} stopped`;
   pb.onclick = () => act({ kind: "docker", action: "container-prune" }, pb);
