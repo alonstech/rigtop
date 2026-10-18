@@ -3,7 +3,7 @@
 **`top` for dev machines that run AI coding agents and Docker all day.**
 A live terminal status line and a local web dashboard showing what's straining your machine, with one-tap fixes to free memory and disk.
 
-![license: MIT](https://img.shields.io/badge/license-MIT-blue) ![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue) ![platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue) ![python: 3.9+](https://img.shields.io/badge/python-3.9%2B-blue) ![platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey) ![dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen)
 
 ```bash
 git clone https://github.com/alonstech/rigtop && cd rigtop && ./rigtop
@@ -44,7 +44,12 @@ Your browser opens the dashboard at a private link (`http://127.0.0.1:7777/#k=�
 ● rigtop http://127.0.0.1:7777  CPU  47% ▮▮▮▮▯▯▯▯  MEM 26.1/32 GB  pressure normal  swap 2.9 GB  disk 41.0 GB free  docker 3 up · cache 9.8 GB  dashboard open
 ```
 
-**Requirements:** macOS with Python 3.9+. The Python that ships with Xcode Command Line Tools (`/usr/bin/python3`) is enough; if you don't have it, run `xcode-select --install`. The launcher always uses that system Python, so asdf, pyenv or an active virtualenv can't get in the way. Docker is optional.
+**Requirements:** macOS or Linux with Python 3.9+. Docker is optional.
+
+- **macOS:** the Python that ships with Xcode Command Line Tools (`/usr/bin/python3`) is enough; if you don't have it, run `xcode-select --install`.
+- **Linux:** the distribution's `/usr/bin/python3`. Kernel 4.20+ gives rigtop real memory-pressure readings (PSI); on older kernels it falls back to available memory. `ionice`, `gio` and `gdbus` are used when present (they ship with util-linux and GLib on every mainstream desktop).
+
+The launcher always uses that system Python, so asdf, pyenv or an active virtualenv can't get in the way.
 
 If you close the tab, reopen the link printed in the terminal. The key changes every time rigtop starts.
 
@@ -110,17 +115,16 @@ Tick what you want and press **Clean selected**. Caches that tools rebuild on th
 A monitor for an overloaded machine must not add to the load.
 
 - **No dependencies.** Python standard library only.
-- **No polling subprocesses for the basics.** CPU, memory, pressure and swap come straight from the Mach kernel through `ctypes`. Nothing runs `top` or `vm_stat`.
+- **No polling subprocesses for the basics.** CPU, memory, pressure and swap come straight from the kernel: the Mach APIs through `ctypes` on macOS, `/proc` files on Linux. Nothing runs `top`, `vm_stat` or `free`.
 - **Heavier work only while you're looking.** `ps` and the Docker CLI run only while a dashboard tab is open *and visible*. A hidden tab stops polling entirely.
-- **Background priority for disk work.** Cache measurement (`du`) and cleanups run under `taskpolicy -b`, macOS's lowest I/O and CPU tier, off the web thread.
+- **Background priority for disk work.** Cache measurement (`du`) and cleanups run under `taskpolicy -b` on macOS (its lowest I/O and CPU tier) or `ionice -c3 nice -n19` on Linux, off the web thread.
 - **Nothing written to disk.** History lives in memory.
-
-Measured on an M5 MacBook Pro:
 
 | | rigtop's CPU | rigtop's memory |
 |---|---|---|
-| Dashboard open (`ps` + `docker stats` included) | ≈ 0.1% of the machine | ~24 MB |
-| Dashboard closed (terminal line only) | ≈ 0% | ~22 MB |
+| M5 MacBook Pro, dashboard open (`ps` + `docker stats` included) | ≈ 0.1% of the machine | ~24 MB |
+| M5 MacBook Pro, dashboard closed (terminal line only) | ≈ 0% | ~22 MB |
+| 4-core Intel i5-2400 (2011) on Ubuntu, dashboard open (~300 processes, 13 containers) | ≈ 0.4% of the machine | ~33 MB |
 
 ## Safety
 
@@ -128,8 +132,8 @@ rigtop can delete files and end processes, so it's deliberately conservative.
 
 - **Two taps for quick actions.** The first tap arms the button (it turns red), the second within 3.5 s runs it. Anything that can lose data (unused Docker volumes, all unused images, emptying the Trash, restarting Docker) opens a dialog showing the exact command instead.
 - **Fixed allow-lists.** Docker commands and cache folders come from fixed lists in the code. Cache cleaning only empties known folders inside your home folder and never follows symlinks.
-- **Careful with processes.** rigtop only signals processes you own. It never touches macOS system agents (`/System`, `/usr`…), itself, or the terminal that launched it, and it checks a pid still belongs to the same program before signalling it. Coding agents and terminals are never suggested as "idle", because waiting for input looks idle.
-- **Local and private.** The server listens on `127.0.0.1` only and rejects requests with any other `Host` header (DNS-rebinding protection). Each run creates a secret key that only appears in the link rigtop opens and prints, after the `#`, which browsers never send to any server. The page keeps the key in storage that belongs only to rigtop's own address and port, and sends it as a header on every request. No cookies are used, because browsers send cookies to every port on `127.0.0.1`. Actions also need a same-origin check. Other user accounts on the same Mac, your other local dev servers and other websites can't read your process list or trigger anything.
+- **Careful with processes.** rigtop only signals processes you own. It never touches macOS system agents (`/System`, `/usr`…) or the Linux desktop's own services (anything systemd runs in your session, such as GNOME Shell or PipeWire), itself, or the terminal that launched it, and it checks a pid still belongs to the same program before signalling it. Coding agents and terminals are never suggested as "idle", because waiting for input looks idle.
+- **Local and private.** The server listens on `127.0.0.1` only and rejects requests with any other `Host` header (DNS-rebinding protection). Each run creates a secret key that only appears in the link rigtop opens and prints, after the `#`, which browsers never send to any server. The page keeps the key in storage that belongs only to rigtop's own address and port, and sends it as a header on every request. No cookies are used, because browsers send cookies to every port on `127.0.0.1`. Actions also need a same-origin check. Other user accounts on the same machine, your other local dev servers and other websites can't read your process list or trigger anything.
 - **No root.** No `sudo`, no privileged helpers.
 
 ## Similar tools
@@ -149,12 +153,23 @@ rigtop's angle is the combination of a live view plus one-tap fixes, tuned for a
 |---|---|
 | macOS (Apple Silicon) | ✅ Supported, and where it's developed |
 | macOS (Intel) | Should work (same kernel APIs); reports welcome |
-| Linux | 🚧 Not yet. A great first contribution: `/proc/stat`, `/proc/meminfo` and `/proc/pressure/memory` cover everything needed |
+| Linux | ✅ Supported. Tested on Ubuntu 26.04 (GNOME, Docker Engine); reports from other distros and desktops welcome |
 | Windows | 💭 Not yet. Needs a Win32 backend; Docker Desktop runs in WSL2 there |
+
+### How rigtop reads Linux
+
+The tiles mean the same thing on both systems, but Linux gets its numbers differently:
+
+- **CPU, memory, swap:** `/proc/stat`, `/proc/meminfo` and `/proc/vmstat`, read as plain files with no forks. *Kernel* stands in for macOS's *Wired* (unreclaimable slab, kernel stacks, page tables); *Compressed* is zswap plus zram; *Cached* is page cache the kernel can drop.
+- **Memory pressure:** `/proc/pressure/memory` (PSI), which measures how long tasks actually stalled on memory, combined with `MemAvailable`.
+- **Processes:** read from `/proc` directly instead of `ps`, so CPU % reflects the last few seconds (procps' `ps` reports a lifetime average). Orphans are found under PID 1 *or* your `systemd --user`, which adopts them on most desktops. Desktop services that systemd runs for you (GNOME Shell, PipeWire, portals…) are recognised from their cgroup and are never offered for ending.
+- **Docker:** with Docker Engine, containers run on the host, so they show as one *Docker containers* line (found by cgroup) next to *Docker Engine*, and there's no VM to restart. Docker Desktop for Linux keeps its VM line and restart button.
+- **Disk and cleanup:** free space is for the filesystem holding your home folder, caches come from `~/.cache` (`$XDG_CACHE_HOME`), cleanups run under `ionice -c3 nice -n19`, the Trash is the freedesktop.org one (emptied with `gio trash --empty`, and rigtop can show its size), and Reveal asks your file manager over D-Bus.
+- **Quit:** Linux has no portable "please quit" message for apps, so apps offer **End** (`SIGTERM`, which browsers and editors treat as a normal shutdown) instead of **Quit**.
 
 ## Roadmap ideas
 
-- Linux backend, then Windows
+- Windows backend
 - Group processes by **agent session or worktree** ("this Claude session and its dev servers use 4 GB")
 - Find stale `node_modules` / `.venv` / `target/` folders in old projects
 - Alerts: a macOS notification when pressure turns critical or disk drops below a threshold

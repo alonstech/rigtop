@@ -4,7 +4,8 @@ rigtop — a featherweight load monitor and cleaner for dev machines running
 AI coding agents and Docker.
 
 Zero dependencies (Python 3.9+ standard library only). CPU and memory come
-straight from the Mach kernel APIs via ctypes, so the cheap path never forks.
+straight from the kernel (Mach APIs via ctypes on macOS, /proc on Linux), so
+the cheap path never forks.
 `ps` and the Docker CLI only run while a dashboard tab is open and visible;
 disk scans run at background priority, on demand or at most every 30 minutes
 while the dashboard is open. Otherwise rigtop drops to one tiny kernel read
@@ -36,7 +37,7 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOME = os.path.realpath(os.path.expanduser("~"))
@@ -45,24 +46,32 @@ IDLE_INTERVAL = 5       # kernel-only sampling cadence when nobody is watching
 CACHE_SCAN_EVERY = 1800
 HISTORY_SECONDS = 15 * 60
 GB = 1024 ** 3
-BG = ["/usr/sbin/taskpolicy", "-b"] if os.path.exists("/usr/sbin/taskpolicy") else ["nice", "-n", "19"]
+IS_MAC = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
+if os.path.exists("/usr/sbin/taskpolicy"):
+    BG = ["/usr/sbin/taskpolicy", "-b"]           # macOS's background tier: lowest CPU and I/O priority
+elif shutil.which("ionice"):
+    BG = ["ionice", "-c3", "nice", "-n", "19"]    # Linux: idle I/O class plus lowest CPU priority
+else:
+    BG = ["nice", "-n", "19"]
 
 
-# ───────────────────────────── kernel stats (ctypes) ─────────────────────────────
+# ───────────────────────────── kernel stats: macOS (ctypes) ─────────────────────────────
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
 c_uint, c_int, c_u32, c_u64, c_size_t = ctypes.c_uint, ctypes.c_int, ctypes.c_uint32, ctypes.c_uint64, ctypes.c_size_t
-
-libc.mach_host_self.restype = c_uint
-libc.host_processor_info.argtypes = [c_uint, c_int, ctypes.POINTER(c_uint),
-                                     ctypes.POINTER(ctypes.POINTER(c_int)), ctypes.POINTER(c_uint)]
-libc.vm_deallocate.argtypes = [c_uint, ctypes.c_void_p, c_size_t]
-libc.host_statistics64.argtypes = [c_uint, c_int, ctypes.c_void_p, ctypes.POINTER(c_uint)]
-libc.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(c_size_t), ctypes.c_void_p, c_size_t]
-
-HOST = libc.mach_host_self()          # fetched once; each call would add a port reference
-TASK_SELF = c_uint.in_dll(libc, "mach_task_self_").value
 PROCESSOR_CPU_LOAD_INFO, HOST_VM_INFO64 = 2, 4
+
+if IS_MAC:      # the Mach symbols don't exist anywhere else
+    libc.mach_host_self.restype = c_uint
+    libc.host_processor_info.argtypes = [c_uint, c_int, ctypes.POINTER(c_uint),
+                                         ctypes.POINTER(ctypes.POINTER(c_int)), ctypes.POINTER(c_uint)]
+    libc.vm_deallocate.argtypes = [c_uint, ctypes.c_void_p, c_size_t]
+    libc.host_statistics64.argtypes = [c_uint, c_int, ctypes.c_void_p, ctypes.POINTER(c_uint)]
+    libc.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(c_size_t), ctypes.c_void_p, c_size_t]
+
+    HOST = libc.mach_host_self()          # fetched once; each call would add a port reference
+    TASK_SELF = c_uint.in_dll(libc, "mach_task_self_").value
 
 
 class VMStats64(ctypes.Structure):    # <mach/vm_statistics.h> vm_statistics64
@@ -121,12 +130,113 @@ def vm_stats():
     return s
 
 
-DATA_VOLUME = "/System/Volumes/Data" if os.path.exists("/System/Volumes/Data") else "/"
+# Linux: the filesystem holding your home folder and its caches, which is often a separate /home
+DATA_VOLUME = "/System/Volumes/Data" if os.path.exists("/System/Volumes/Data") else "/" if IS_MAC else HOME
 
 
 def disk_usage():
     st = os.statvfs(DATA_VOLUME)
     return st.f_blocks * st.f_frsize, st.f_bavail * st.f_frsize
+
+
+# ───────────────────────────── kernel stats: Linux (/proc) ─────────────────────────────
+# Plain file reads, no forks. The parsers take text so they can be tested with fixtures.
+
+CLK_TCK = os.sysconf("SC_CLK_TCK")
+PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
+
+
+def read_text(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def parse_proc_stat_cpus(text):
+    """Per-core (user, system, idle, nice) ticks from /proc/stat: the same shape cpu_ticks() returns on macOS."""
+    cores = []
+    for line in text.splitlines():
+        if line.startswith("cpu") and line[3:4].isdigit():
+            user, nice, system, idle, iowait, irq, softirq, steal = ([int(x) for x in line.split()[1:9]] + [0] * 8)[:8]
+            cores.append((user, system + irq + softirq + steal, idle + iowait, nice))
+    return cores
+
+
+def parse_kv(text, scale=1):
+    """'Key:   123 kB' (/proc/meminfo) or 'key 123' (/proc/vmstat) lines → {key: int * scale}."""
+    out = {}
+    for line in text.splitlines():
+        parts = line.replace(":", " ").split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            out[parts[0]] = int(parts[1]) * scale
+    return out
+
+
+def parse_psi(text):
+    """/proc/pressure/memory → {"some": avg10, "full": avg10}, the % of the last 10 s that tasks stalled on memory."""
+    out = {}
+    for line in text.splitlines():
+        kind, _, rest = line.partition(" ")
+        m = re.search(r"avg10=([\d.]+)", rest)
+        if m:
+            out[kind] = float(m.group(1))
+    return out
+
+
+def zram_bytes():
+    """RAM used by zram swap devices (Fedora and others swap to compressed RAM by default)."""
+    total = 0
+    for dev in os.listdir("/sys/block") if os.path.isdir("/sys/block") else []:
+        if dev.startswith("zram"):
+            f = read_text("/sys/block/%s/mm_stat" % dev).split()
+            total += int(f[2]) if len(f) > 2 and f[2].isdigit() else 0     # mem_used_total
+    return total
+
+
+def linux_memory(mi, psi, zram=0):
+    """Split /proc/meminfo into the buckets the macOS view uses, so the tiles and charts work unchanged.
+    app + wired + compressed + cached + free always adds up to total."""
+    total, free = mi.get("MemTotal", 0), mi.get("MemFree", 0)
+    # page cache and reclaimable slab: the kernel drops these on demand (Shmem lives in Cached but can't be dropped)
+    cached = max(mi.get("Buffers", 0) + mi.get("Cached", 0) - mi.get("Shmem", 0) + mi.get("SReclaimable", 0), 0)
+    # kernel memory that can't be reclaimed: the closest thing Linux has to macOS's "wired"
+    wired = mi.get("SUnreclaim", 0) + mi.get("KernelStack", 0) + mi.get("PageTables", 0) + mi.get("SecPageTables", 0)
+    compressed = mi.get("Zswap", 0) + zram
+    app = max(total - free - cached - wired - compressed, 0)      # anonymous memory, tmpfs/shm and driver buffers
+    free_pct = int(round(100.0 * mi.get("MemAvailable", free + cached) / max(total, 1)))
+    # PSI says how long tasks actually waited on memory, which is what macOS's pressure level tracks too
+    some, full = psi.get("some", 0.0), psi.get("full", 0.0)
+    level = 4 if full >= 15 or free_pct < 5 else 2 if some >= 10 or full >= 2 or free_pct < 15 else 1
+    return {"total": total, "app": app, "wired": wired, "compressed": compressed, "cached": cached,
+            "used": app + wired + compressed, "free": free, "pressure_level": level, "free_pct": free_pct,
+            "swap_total": mi.get("SwapTotal", 0), "swap_used": max(mi.get("SwapTotal", 0) - mi.get("SwapFree", 0), 0)}
+
+
+def linux_host():
+    m = re.search(r"^(?:model name|Model|Hardware)\s*:\s*(.+)$", read_text("/proc/cpuinfo"), re.M)
+    osr = re.search(r'^PRETTY_NAME="?([^"\n]+)', read_text("/etc/os-release"), re.M)
+    return {"chip": re.sub(r"\s+", " ", m.group(1)).strip() if m else platform.machine(), "pcores": 0, "ecores": 0,
+            "mem_total": parse_kv(read_text("/proc/meminfo"), 1024).get("MemTotal", 0),
+            "os": osr.group(1) if osr else "Linux " + platform.release()}
+
+
+def linux_proc_path(pid, comm, ppid=None):
+    """The executable behind a pid, as the process list reports it. Other users' /exe links are hidden from us,
+    so fall back to an absolute argv[0], then to the short name. Kernel threads come back as "[name]" like in ps."""
+    if pid == 2 or ppid == 2:
+        return "[%s]" % comm
+    try:
+        path = os.readlink("/proc/%d/exe" % pid)
+    except OSError:
+        argv0 = read_text("/proc/%d/cmdline" % pid).split("\0", 1)[0]
+        path = argv0 if argv0.startswith("/") else comm
+    if path.endswith(" (deleted)"):          # the binary was upgraded while it ran
+        path = path[:-10]
+    if comm and re.match(r"^[\d.]+$", path.rsplit("/", 1)[-1]):    # versioned binaries, e.g. …/claude/versions/2.1.3
+        path = path.rsplit("/", 1)[0] + "/" + comm
+    return path
 
 
 # ───────────────────────────── helpers ─────────────────────────────
@@ -192,29 +302,39 @@ def _p(rel):
     return os.path.join(HOME, rel)
 
 
+CACHE_HOME = os.environ.get("XDG_CACHE_HOME") or _p(".cache")
+
+
+def _c(mac, linux=None):
+    """A per-user cache folder: ~/Library/Caches/<mac> on macOS, ~/.cache/<linux> (XDG) on Linux."""
+    return _p("Library/Caches/" + mac) if IS_MAC else os.path.join(CACHE_HOME, linux or mac)
+
+
 CACHE_TARGETS = [
-    {"id": "go-build", "label": "Go build cache", "path": os.environ.get("GOCACHE") or _p("Library/Caches/go-build"), "safe": True,
+    {"id": "go-build", "label": "Go build cache", "path": os.environ.get("GOCACHE") or _c("go-build"), "safe": True,
      "hint": "Compiled Go packages. Rebuilt automatically; the next build is slower."},
     {"id": "go-mod", "label": "Go module downloads", "path": os.environ.get("GOMODCACHE") or _p("go/pkg/mod"), "safe": False,
      "writable": True, "hint": "Downloaded Go modules. Re-downloaded on the next build (needs network)."},
     {"id": "npm", "label": "npm cache", "path": _p(".npm/_cacache"), "safe": True, "hint": "Downloaded npm packages. Re-downloaded when needed."},
     {"id": "uv", "label": "uv cache", "path": _p(".cache/uv"), "safe": True, "hint": "Python packages downloaded by uv. Existing virtualenvs keep working."},
-    {"id": "pip", "label": "pip cache", "path": _p("Library/Caches/pip"), "safe": True, "hint": "Downloaded Python wheels."},
-    {"id": "yarn", "label": "Yarn cache", "path": _p("Library/Caches/Yarn"), "safe": True, "hint": "Downloaded Yarn packages."},
+    {"id": "pip", "label": "pip cache", "path": _c("pip"), "safe": True, "hint": "Downloaded Python wheels."},
+    {"id": "yarn", "label": "Yarn cache", "path": _c("Yarn", "yarn"), "safe": True, "hint": "Downloaded Yarn packages."},
     {"id": "bun", "label": "Bun cache", "path": _p(".bun/install/cache"), "safe": True, "hint": "Downloaded Bun packages."},
-    {"id": "brew", "label": "Homebrew downloads", "path": _p("Library/Caches/Homebrew"), "safe": True, "hint": "Old bottle downloads."},
+    {"id": "brew", "label": "Homebrew downloads", "path": _c("Homebrew"), "safe": True, "hint": "Old bottle downloads."},
     {"id": "cargo", "label": "Cargo downloads", "path": _p(".cargo/registry/cache"), "safe": True, "hint": "Downloaded .crate files."},
     {"id": "xcode", "label": "Xcode DerivedData", "path": _p("Library/Developer/Xcode/DerivedData"), "safe": True, "hint": "Xcode build products and indexes."},
     {"id": "sim", "label": "Simulator caches", "path": _p("Library/Developer/CoreSimulator/Caches"), "safe": True, "hint": "iOS Simulator dyld caches."},
-    {"id": "playwright", "label": "Playwright browsers", "path": _p("Library/Caches/ms-playwright"), "safe": False,
+    {"id": "playwright", "label": "Playwright browsers", "path": _c("ms-playwright"), "safe": False,
      "hint": "Test browsers. Reinstall with `npx playwright install`."},
     {"id": "gradle", "label": "Gradle caches", "path": _p(".gradle/caches"), "safe": False, "hint": "Re-downloaded on the next Gradle build."},
     {"id": "maven", "label": "Maven repository", "path": _p(".m2/repository"), "safe": False, "hint": "Re-downloaded on the next Maven build."},
     {"id": "hf", "label": "Hugging Face models", "path": _p(".cache/huggingface"), "safe": False, "hint": "Downloaded models; large to re-download."},
 ]
 TARGETS_BY_ID = {t["id"]: t for t in CACHE_TARGETS}
-APP_CACHES = _p("Library/Caches")
+APP_CACHES = _p("Library/Caches") if IS_MAC else CACHE_HOME
 KNOWN_CACHE_PATHS = {os.path.realpath(t["path"]) for t in CACHE_TARGETS}
+# the freedesktop.org Trash (Linux); macOS's Trash is emptied through Finder instead
+TRASH = os.path.join(os.environ.get("XDG_DATA_HOME") or _p(".local/share"), "Trash")
 
 # Interpreters and dev servers. One of these whose parent died (ppid 1) is almost
 # always a leftover from a crashed agent run or a forgotten dev server.
@@ -245,6 +365,63 @@ def group_of(path, docker_vm_name):
     if m:
         return m.group(1), False
     return base, False
+
+
+LINUX_ALIASES = dict(ALIASES, **{
+    "chrome": "Google Chrome", "chrome_crashpad_handler": "Google Chrome", "chromium": "Chromium",
+    "chromium-browser": "Chromium", "firefox": "Firefox", "firefox-bin": "Firefox", "code": "VS Code",
+    "cursor": "Cursor", "slack": "Slack", "claude-desktop": "Claude",
+    "dockerd": "Docker Engine", "containerd": "Docker Engine", "containerd-shim-runc-v2": "Docker Engine",
+    "docker-proxy": "Docker Engine", "rootlesskit": "Docker Engine"})
+# processes inside a container (rootful or rootless); with Docker Engine they run on the host, not in a VM
+CONTAINER_CGROUP = re.compile(r"/docker-[0-9a-f]{12,64}\.scope|/docker/[0-9a-f]{12,64}")
+FLATPAK_CGROUP = re.compile(r"app-flatpak-([\w.-]+?)-\d+\.scope")
+# The desktop's own services run as you, but systemd restarts them (or the session dies without them).
+# systemd --user keeps them in init.scope, session.slice and background.slice; your apps live in app.slice.
+LINUX_SYSTEM_CGROUP = re.compile(r"/user@\d+\.service/(?:init\.scope|session\.slice|background\.slice)(?:/|$)", re.M)
+LINUX_SYSTEM_PATH = re.compile(r"^(/usr/libexec/|/usr/lib/systemd/|/lib/systemd/|/usr/sbin/|/sbin/)")
+LINUX_SYSTEM_NAMES = {"systemd", "(sd-pam)", "dbus-daemon", "dbus-broker", "dbus-broker-launch", "pipewire", "pipewire-pulse",
+                      "wireplumber", "pulseaudio", "Xorg", "Xwayland", "gnome-shell", "gnome-session-binary", "gnome-session-ctl",
+                      "plasmashell", "kwin_wayland", "kwin_x11", "ksmserver", "xfce4-session", "xfwm4", "cinnamon",
+                      "sshd", "sshd-session", "gdm-wayland-session", "gdm-x-session"}
+NOT_KILLABLE |= {"Docker containers", "Docker Engine", "Linux kernel"}
+
+
+def group_of_linux(path, cgroup, docker_vm_name):
+    """Linux has no .app bundles: group by executable name, plus a few things only cgroups reveal."""
+    base = path.rsplit("/", 1)[-1]
+    if path.startswith("["):
+        return "Linux kernel", False
+    if CONTAINER_CGROUP.search(cgroup):
+        return "Docker containers", False
+    if base.startswith("qemu-system") and docker_vm_name == "Docker VM":      # Docker Desktop for Linux
+        return docker_vm_name, False
+    if base in LINUX_ALIASES:
+        return LINUX_ALIASES[base], False
+    m = FLATPAK_CGROUP.search(cgroup)
+    if m:
+        return m.group(1).rsplit(".", 1)[-1], False      # com.slack.Slack → Slack, bwrap helpers included
+    return base, False
+
+
+def linux_is_system(path, cgroup):
+    return bool(path.startswith("[") or LINUX_SYSTEM_PATH.match(path) or LINUX_SYSTEM_CGROUP.search(cgroup)
+                or path.rsplit("/", 1)[-1] in LINUX_SYSTEM_NAMES)
+
+
+def proc_owner(pid):
+    """(uid, path) of a live pid, with path spelled the way the process list reports it; None once it has exited."""
+    if IS_LINUX:
+        try:
+            uid = os.stat("/proc/%d" % pid).st_uid
+        except OSError:
+            return None
+        return uid, linux_proc_path(pid, read_text("/proc/%d/comm" % pid).strip())
+    code, out, _ = run(["ps", "-o", "uid=,comm=", "-p", str(pid)], timeout=5)
+    uid, _, comm = out.strip().partition(" ")
+    if code != 0 or not uid:
+        return None
+    return int(uid), comm.strip()
 
 
 # ───────────────────────────── background jobs ─────────────────────────────
@@ -308,16 +485,21 @@ class Monitor:
         self.uid = os.getuid()
         self.pid = os.getpid()
         self.ncpu = os.cpu_count() or 1
-        self.page = sysctl_int("hw.pagesize", 16384)
-        self.host = {
-            "name": socket.gethostname().split(".")[0],
-            "chip": sysctl_str("machdep.cpu.brand_string") or platform.machine(),
-            "cores": self.ncpu,
-            "pcores": sysctl_int("hw.perflevel0.logicalcpu"),
-            "ecores": sysctl_int("hw.perflevel1.logicalcpu"),
-            "mem_total": sysctl_int("hw.memsize"),
-            "os": "macOS " + platform.mac_ver()[0],
-        }
+        if IS_MAC:
+            self.page = sysctl_int("hw.pagesize", 16384)
+            self.host = {
+                "name": socket.gethostname().split(".")[0],
+                "chip": sysctl_str("machdep.cpu.brand_string") or platform.machine(),
+                "cores": self.ncpu,
+                "pcores": sysctl_int("hw.perflevel0.logicalcpu"),
+                "ecores": sysctl_int("hw.perflevel1.logicalcpu"),
+                "mem_total": sysctl_int("hw.memsize"),
+                "os": "macOS " + platform.mac_ver()[0],
+            }
+        else:
+            self.page = PAGE_SIZE
+            self.host = dict(linux_host(), name=socket.gethostname().split(".")[0], cores=self.ncpu)
+        self.host["platform"] = "linux" if IS_LINUX else "darwin"     # the dashboard words a few things differently
         self.history = collections.deque(maxlen=HISTORY_SECONDS // 2)
         self.state = {}
         self.apps = []
@@ -327,14 +509,18 @@ class Monitor:
         self.protected = {self.pid}
         self.self_stats = {"cpu": 0.0, "rss": 0}
         self.docker = {"available": bool(self._docker_bin()), "running": False, "containers": [],
-                       "df": None, "vm": None, "t": 0, "df_t": 0, "error": None}
-        self.caches = {"targets": [], "app_caches": [], "t": 0, "scanning": False}
+                       "df": None, "vm": None, "t": 0, "df_t": 0, "error": None,
+                       "can_restart": IS_MAC}     # Linux: only Docker Desktop has a VM to restart
+        self.caches = {"targets": [], "app_caches": [], "t": 0, "scanning": False, "app_dir": APP_CACHES}
         self.du = {}               # folder -> {"t", "total", "items": [{name, path, size}]}
         self.jobs = Jobs(self._job_done)
         self._prev_ticks = None
         self._prev_vm = None
         self._prev_t = None
         self._prev_rusage = None
+        self._proc_prev = {}       # Linux: pid -> (start time, cpu ticks) from the previous process sample
+        self._proc_prev_t = None
+        self._proc_info = {}       # Linux: pid -> ((start time, comm), path, cgroup), read once per process
 
     def _job_done(self, key):
         if key.startswith(("cache:", "appcache:", "clean-selected", "trash")):
@@ -362,7 +548,7 @@ class Monitor:
     # ── system sampling ──
     def sample(self, with_procs):
         now = time.time()
-        ticks, vm = cpu_ticks(), vm_stats()
+        ticks = cpu_ticks() if IS_MAC else parse_proc_stat_cpus(read_text("/proc/stat"))
         cores, user, system = [], 0.0, 0.0
         if self._prev_ticks and len(self._prev_ticks) == len(ticks):
             tu = ts = tt = 0
@@ -373,31 +559,10 @@ class Monitor:
                 tu, ts, tt = tu + du + dn, ts + ds, tt + tot
             user, system = 100.0 * tu / max(tt, 1), 100.0 * ts / max(tt, 1)
         dt = (now - self._prev_t) if self._prev_t else None
-
-        def rate(field):
-            if not (dt and self._prev_vm):
-                return 0
-            return max(getattr(vm, field) - getattr(self._prev_vm, field), 0) / dt
-
-        pg = self.page
-        app = max(vm.internal_page_count - vm.purgeable_count, 0) * pg
-        wired = vm.wire_count * pg
-        compressed = vm.compressor_page_count * pg
-        cached = (vm.external_page_count + vm.purgeable_count) * pg
-        total = self.host["mem_total"]
-        swap = sysctl_raw("vm.swapusage", XswUsage)
+        mem = self._mem_mac(dt) if IS_MAC else self._mem_linux(dt)
+        app, wired, compressed, cached = mem["app"], mem["wired"], mem["compressed"], mem["cached"]
         disk_total, disk_free = disk_usage()
-        mem = {
-            "total": total, "app": app, "wired": wired, "compressed": compressed, "cached": cached,
-            "used": app + wired + compressed,
-            "free": max(total - app - wired - compressed - cached, 0),
-            "pressure_level": sysctl_int("kern.memorystatus_vm_pressure_level", 1),
-            "free_pct": sysctl_int("kern.memorystatus_level", 100),
-            "swap_total": swap.total if swap else 0, "swap_used": swap.used if swap else 0,
-            "swapins": rate("swapins") * pg, "swapouts": rate("swapouts") * pg,
-            "pageins": rate("pageins") * pg, "compressions": rate("compressions") * pg,
-        }
-        self._prev_ticks, self._prev_vm, self._prev_t = ticks, vm, now
+        self._prev_ticks, self._prev_t = ticks, now
 
         ru = resource.getrusage(resource.RUSAGE_SELF), resource.getrusage(resource.RUSAGE_CHILDREN)
         cpu_s = sum(r.ru_utime + r.ru_stime for r in ru)
@@ -422,13 +587,51 @@ class Monitor:
                                      round(cached / GB, 3), round(mem["swap_used"] / GB, 3),
                                      mem["pressure_level"], mem["free_pct"]])
 
-    def _sample_procs(self):
+    def _mem_mac(self, dt):
+        vm = vm_stats()
+
+        def rate(field):
+            if not (dt and self._prev_vm):
+                return 0
+            return max(getattr(vm, field) - getattr(self._prev_vm, field), 0) / dt
+
+        pg = self.page
+        app = max(vm.internal_page_count - vm.purgeable_count, 0) * pg
+        wired = vm.wire_count * pg
+        compressed = vm.compressor_page_count * pg
+        cached = (vm.external_page_count + vm.purgeable_count) * pg
+        total = self.host["mem_total"]
+        swap = sysctl_raw("vm.swapusage", XswUsage)
+        self._prev_vm = vm
+        return {
+            "total": total, "app": app, "wired": wired, "compressed": compressed, "cached": cached,
+            "used": app + wired + compressed,
+            "free": max(total - app - wired - compressed - cached, 0),
+            "pressure_level": sysctl_int("kern.memorystatus_vm_pressure_level", 1),
+            "free_pct": sysctl_int("kern.memorystatus_level", 100),
+            "swap_total": swap.total if swap else 0, "swap_used": swap.used if swap else 0,
+            "swapins": rate("swapins") * pg, "swapouts": rate("swapouts") * pg,
+            "pageins": rate("pageins") * pg, "compressions": rate("compressions") * pg,
+        }
+
+    def _mem_linux(self, dt):
+        vm = parse_kv(read_text("/proc/vmstat"))
+
+        def rate(field):        # /proc/vmstat counts pages
+            if not (dt and self._prev_vm):
+                return 0
+            return max(vm.get(field, 0) - self._prev_vm.get(field, 0), 0) / dt * self.page
+
+        mem = linux_memory(parse_kv(read_text("/proc/meminfo"), 1024), parse_psi(read_text("/proc/pressure/memory")), zram_bytes())
+        mem.update(swapins=rate("pswpin"), swapouts=rate("pswpout"), pageins=rate("pgmajfault"), compressions=rate("zswpout"))
+        self._prev_vm = vm
+        return mem
+
+    def _ps_mac(self):
         code, out, _ = run(["ps", "-axo", "pid=,ppid=,uid=,pcpu=,rss=,comm="], timeout=10)
         if code != 0:
-            return
-        docker_up = "com.docker.backend" in out
-        vm_name = "Docker VM" if docker_up else "Virtual Machine"
-        rows, parent = [], {}
+            return None
+        rows = []
         for line in out.splitlines():
             parts = line.split(None, 5)
             if len(parts) < 6:
@@ -437,23 +640,73 @@ class Monitor:
                 pid, ppid, uid, pcpu, rss = int(parts[0]), int(parts[1]), int(parts[2]), float(parts[3]), int(parts[4]) * 1024
             except ValueError:
                 continue
-            parent[pid] = ppid
-            rows.append((pid, ppid, uid, pcpu, rss, parts[5]))
+            rows.append((pid, ppid, uid, pcpu, rss, parts[5], ""))
+        return rows
+
+    def _ps_linux(self):
+        """The same rows as _ps_mac, read straight from /proc instead of forking ps. %CPU is measured between
+        samples (100 = one core) like macOS's ps; procps' %CPU is a lifetime average, which hides a busy spell."""
+        now = time.monotonic()
+        dt = now - self._proc_prev_t if self._proc_prev_t else 0
+        uptime = float((read_text("/proc/uptime").split() or ["0"])[0])
+        rows, ticks_now, info_now = [], {}, {}
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            try:
+                with open("/proc/%d/stat" % pid) as f:
+                    stat = f.read()
+                uid = os.stat("/proc/%d" % pid).st_uid
+            except OSError:
+                continue        # exited while we looked
+            comm = stat[stat.find("(") + 1:stat.rfind(")")]
+            f = stat[stat.rfind(")") + 2:].split()      # fields from "state" on; see proc(5)
+            try:
+                ppid, ticks, start, rss = int(f[1]), int(f[11]) + int(f[12]), int(f[19]), int(f[21]) * PAGE_SIZE
+            except (IndexError, ValueError):
+                continue
+            info = self._proc_info.get(pid)
+            if not info or info[0] != (start, comm):    # new process (or an exec): look up its path and cgroup once
+                info = ((start, comm), linux_proc_path(pid, comm, ppid), read_text("/proc/%d/cgroup" % pid))
+            info_now[pid] = info
+            ticks_now[pid] = (start, ticks)
+            prev = self._proc_prev.get(pid)
+            if prev and prev[0] == start and dt > 0:
+                pcpu = 100.0 * (ticks - prev[1]) / CLK_TCK / dt
+            else:                                       # first sight: its average so far
+                age = uptime - start / CLK_TCK
+                pcpu = 100.0 * ticks / CLK_TCK / age if age > 1 else 0.0
+            rows.append((pid, ppid, uid, round(max(pcpu, 0.0), 1), rss, info[1], info[2]))
+        self._proc_prev, self._proc_prev_t, self._proc_info = ticks_now, now, info_now
+        return rows
+
+    def _sample_procs(self):
+        rows = self._ps_linux() if IS_LINUX else self._ps_mac()
+        if rows is None:
+            return
+        docker_up = any("com.docker.backend" in r[5] for r in rows)
+        vm_name = "Docker VM" if docker_up else "Virtual Machine"
+        parent = {r[0]: r[1] for r in rows}
         # never signal rigtop or the shell/terminal chain that launched it
         protected, p = {self.pid}, self.pid
         while p > 1 and p in parent:
             p = parent[p]
             protected.add(p)
+        # Orphans get re-parented to pid 1, or on Linux usually to your systemd --user, which is a subreaper
+        reapers = {1} | {r[0] for r in rows if IS_LINUX and r[2] == self.uid and r[5].rsplit("/", 1)[-1] == "systemd"}
         groups, procs, orphans = {}, {}, []
-        for pid, ppid, uid, pcpu, rss, path in rows:
+        for pid, ppid, uid, pcpu, rss, path, cgroup in rows:
             if pid == self.pid:
                 self.self_stats["rss"] = rss
                 name, quittable = "rigtop (this tool)", False
+            elif IS_LINUX:
+                name, quittable = group_of_linux(path, cgroup, vm_name)
             else:
                 name, quittable = group_of(path, vm_name)
             if rss == 0 and pcpu == 0:
                 continue
-            own = uid == self.uid and not SYSTEM_PATH.match(path)
+            own = uid == self.uid and not (linux_is_system(path, cgroup) if IS_LINUX else SYSTEM_PATH.match(path))
             g = groups.get(name)
             if g is None:
                 g = groups[name] = {"name": name, "count": 0, "cpu": 0.0, "mem": 0, "quittable": quittable,
@@ -467,7 +720,7 @@ class Monitor:
             proc = {"pid": pid, "cpu": round(pcpu / self.ncpu, 2), "cores": round(pcpu / 100, 2),
                     "mem": rss, "path": path, "own": own and pid not in protected}
             procs.setdefault(name, []).append(proc)
-            if own and ppid == 1 and pid not in protected and not path.startswith("/Applications/") and DEV_RUNTIME.match(path.rsplit("/", 1)[-1]):
+            if own and ppid in reapers and pid not in protected and not path.startswith("/Applications/") and DEV_RUNTIME.match(path.rsplit("/", 1)[-1]):
                 orphans.append(proc)
         apps = sorted(groups.values(), key=lambda g: g["cpu"] * 4 + g["mem"] / GB, reverse=True)
         for g in apps:
@@ -498,6 +751,8 @@ class Monitor:
                 if os.path.isdir(t["path"]):
                     size = du_k(t["path"]).get(t["path"], 0)
                     targets.append(dict({k: t[k] for k in ("id", "label", "path", "safe", "hint")}, size=size))
+            trash_files = os.path.join(TRASH, "files")     # macOS hides the Trash's size from us; Linux doesn't
+            trash = du_k(trash_files).get(trash_files, 0) if IS_LINUX and os.path.isdir(trash_files) else None
             app_caches = []
             if os.path.isdir(APP_CACHES):
                 for p, size in du_k(APP_CACHES, depth=1).items():
@@ -507,7 +762,7 @@ class Monitor:
                 app_caches.sort(key=lambda c: c["size"], reverse=True)
             with self.lock:
                 self.caches.update(targets=sorted(targets, key=lambda c: c["size"], reverse=True),
-                                   app_caches=app_caches[:12], t=time.time())
+                                   app_caches=app_caches[:12], trash=trash, t=time.time())
         finally:
             self.caches["scanning"] = False
 
@@ -590,10 +845,12 @@ class Monitor:
                 if key:
                     df[key] = {"size": parse_size(r.get("Size")), "reclaimable": parse_size(r.get("Reclaimable")),
                                "count": int(r.get("TotalCount") or 0), "active": int(r.get("Active") or 0)}
-            code, out, _ = run([d, "info", "--format", "{{.MemTotal}} {{.NCPU}} {{.ServerVersion}}"], timeout=15)
-            parts = out.split()
-            upd["df"], upd["df_t"] = df or None, time.time()
-            upd["vm"] = {"mem_limit": int(parts[0]), "cpus": int(parts[1]), "version": parts[2]} if code == 0 and len(parts) == 3 else None
+            code, out, _ = run([d, "info", "--format", "{{.MemTotal}} {{.NCPU}} {{.ServerVersion}} {{.OperatingSystem}}"], timeout=15)
+            parts = out.split(None, 3)
+            # Docker Engine on Linux runs containers on the host, so there's no VM to size or restart
+            has_vm = IS_MAC or (len(parts) == 4 and "Docker Desktop" in parts[3])
+            upd["df"], upd["df_t"], upd["can_restart"] = df or None, time.time(), has_vm
+            upd["vm"] = {"mem_limit": int(parts[0]), "cpus": int(parts[1]), "version": parts[2]} if code == 0 and len(parts) >= 3 and has_vm else None
         with self.lock:
             self.docker.update(upd)
 
@@ -874,6 +1131,22 @@ def _cache_job(mon, cid):
     return "cache:" + cid, "Cleaning " + t["label"], lambda: empty_dir(t["path"], make_writable=t.get("writable", False))
 
 
+def reveal_linux(path):
+    """Select the item in the file manager (the freedesktop FileManager1 D-Bus API), else just open its folder."""
+    uri = "file://" + quote(path)       # percent-encoded, so no quote can break out of the GVariant string below
+    code, _, _ = run(["gdbus", "call", "--session", "--dest", "org.freedesktop.FileManager1",
+                      "--object-path", "/org/freedesktop/FileManager1", "--method", "org.freedesktop.FileManager1.ShowItems",
+                      "['%s']" % uri, ""], timeout=10)
+    if code == 0:
+        return {"ok": True, "message": "revealed in your file manager"}
+    try:    # detached: xdg-open may start the file manager itself, which would otherwise hold our pipes open
+        subprocess.Popen(["xdg-open", path if os.path.isdir(path) else os.path.dirname(path)], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        return {"ok": False, "message": "couldn't open a file manager: %s" % e}
+    return {"ok": True, "message": "opened in your file manager"}
+
+
 def do_action(mon, body):
     kind = body.get("kind")
 
@@ -925,7 +1198,11 @@ def do_action(mon, body):
 
     if kind == "trash":
         def fn():
-            code, _, err = run(["osascript", "-e", 'tell application "Finder" to empty trash'], timeout=1800)
+            if IS_LINUX and not shutil.which("gio"):     # no GLib: empty the freedesktop.org Trash folders directly
+                results = [empty_dir(os.path.join(TRASH, d)) for d in ("files", "info") if os.path.isdir(os.path.join(TRASH, d))]
+                return all(ok for ok, _ in results), "Trash emptied" if all(ok for ok, _ in results) else results[0][1]
+            cmd = BG + ["gio", "trash", "--empty"] if IS_LINUX else ["osascript", "-e", 'tell application "Finder" to empty trash']
+            code, _, err = run(cmd, timeout=1800)
             return code == 0, "Trash emptied" if code == 0 else err.strip()[-300:]
         return started(mon.jobs.start("trash", "Emptying Trash", fn), "Emptying Trash")
 
@@ -940,6 +1217,8 @@ def do_action(mon, body):
         path = under_home(body.get("path") or "", allow_home=True)
         if not path or not os.path.exists(path):
             return 400, {"ok": False, "message": "not found"}
+        if IS_LINUX:
+            return 200, reveal_linux(path)
         code, _, err = run(["open", "-R", path], timeout=10)
         return 200, {"ok": code == 0, "message": "revealed in Finder" if code == 0 else err.strip()}
 
@@ -959,13 +1238,15 @@ def do_action(mon, body):
         sig = signal.SIGKILL if body.get("action") == "kill" else signal.SIGTERM
         if pid <= 1 or pid in mon.protected:
             return 400, {"ok": False, "message": "refusing to signal rigtop or the terminal running it"}
-        code, out, _ = run(["ps", "-o", "uid=,comm=", "-p", str(pid)], timeout=5)
-        uid, _, comm = out.strip().partition(" ")
-        if code != 0 or not uid:
+        owner = proc_owner(pid)
+        if owner is None:
             return 200, {"ok": True, "message": "process %d already exited" % pid}
-        if int(uid) != mon.uid:
+        uid, comm = owner
+        if uid != mon.uid:
             return 403, {"ok": False, "message": "pid %d belongs to another user (system process) — not touching it" % pid}
-        if body.get("path") and comm.strip() != body["path"]:     # guard against pid reuse
+        if IS_LINUX and linux_is_system(comm, read_text("/proc/%d/cgroup" % pid)):    # ending these can end your session
+            return 403, {"ok": False, "message": "pid %d is part of your desktop session — not touching it" % pid}
+        if body.get("path") and comm != body["path"]:     # guard against pid reuse
             return 409, {"ok": False, "message": "pid %d is now a different program; refresh and retry" % pid}
         sent, _ = _signal_pids(mon, [pid], sig)
         return 200, {"ok": bool(sent), "message": "sent %s to %d" % (sig.name, pid)}
@@ -1135,8 +1416,8 @@ def print_once(mon):
     print("%s · %s · %d cores · %s" % (h["name"], h["chip"], h["cores"], fmt_gb(h["mem_total"])))
     print("CPU %.0f%% (user %.0f%%, system %.0f%%)  load %s" % (s["cpu"]["total"], s["cpu"]["user"], s["cpu"]["system"],
                                                               " ".join(map(str, s["load"]))))
-    print("Memory %s used of %s  (app %s, wired %s, compressed %s)  pressure %s  swap %s" % (
-        fmt_gb(m["used"]), fmt_gb(m["total"]), fmt_gb(m["app"]), fmt_gb(m["wired"]), fmt_gb(m["compressed"]),
+    print("Memory %s used of %s  (app %s, %s %s, compressed %s)  pressure %s  swap %s" % (
+        fmt_gb(m["used"]), fmt_gb(m["total"]), fmt_gb(m["app"]), "wired" if IS_MAC else "kernel", fmt_gb(m["wired"]), fmt_gb(m["compressed"]),
         {1: "normal", 2: "WARN", 4: "CRITICAL"}.get(m["pressure_level"], "?"), fmt_gb(m["swap_used"])))
     print("Disk %s free of %s" % (fmt_gb(s["disk"]["free"]), fmt_gb(s["disk"]["total"])))
     print("\nTop apps                          CPU      Memory")
@@ -1160,7 +1441,7 @@ def print_once(mon):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Featherweight load monitor and cleaner for macOS.")
+    ap = argparse.ArgumentParser(description="Featherweight load monitor and cleaner for macOS and Linux.")
     ap.add_argument("--port", type=int, default=7777)
     ap.add_argument("--interval", type=float, default=3.0, help="seconds between samples while the dashboard is open")
     ap.add_argument("--docker-interval", type=float, default=10.0, help="seconds between docker stats while open")
@@ -1168,8 +1449,8 @@ def main():
     ap.add_argument("--once", action="store_true", help="print a snapshot and exit")
     ap.add_argument("--demo", action="store_true", help="serve made-up data (for screenshots and UI work); every button is a no-op")
     a = ap.parse_args()
-    if sys.platform != "darwin":
-        sys.exit("rigtop reads macOS kernel stats and only runs on macOS.")
+    if not (IS_MAC or IS_LINUX):
+        sys.exit("rigtop reads kernel stats directly and runs on macOS and Linux only.")
 
     if a.demo and a.once:
         sys.exit("--demo only applies to the dashboard, not --once.")
@@ -1196,7 +1477,7 @@ def main():
         threading.Thread(target=target, daemon=True).start()
 
     tty = sys.stdout.isatty()
-    print(ansi(tty)("1", "rigtop") + (" demo (made-up data, buttons do nothing) → " if a.demo else " is watching this Mac → ") + link)
+    print(ansi(tty)("1", "rigtop") + (" demo (made-up data, buttons do nothing) → " if a.demo else " is watching this %s → " % ("Mac" if IS_MAC else "machine")) + link)
     print(ansi(tty)("2", "Sampling is cheap kernel reads only, until the dashboard is open. Ctrl+C to quit.\n"), flush=True)
     if not a.no_open:
         webbrowser.open(link)
