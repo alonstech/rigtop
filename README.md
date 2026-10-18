@@ -38,7 +38,7 @@ cd rigtop
 ./rigtop
 ```
 
-Your browser opens the dashboard at a private link (`http://127.0.0.1:7777/?k=…`), and the terminal shows a live line:
+Your browser opens the dashboard at a private link (`http://127.0.0.1:7777/#k=…`), and the terminal shows a live line:
 
 ```
 ● rigtop http://127.0.0.1:7777  CPU  47% ▮▮▮▮▯▯▯▯  MEM 26.1/32 GB  pressure normal  swap 2.9 GB  disk 41.0 GB free  docker 3 up · cache 9.8 GB  dashboard open
@@ -129,7 +129,7 @@ rigtop can delete files and end processes, so it's deliberately conservative.
 - **Two taps for quick actions.** The first tap arms the button (it turns red), the second within 3.5 s runs it. Anything that can lose data (unused Docker volumes, all unused images, emptying the Trash, restarting Docker) opens a dialog showing the exact command instead.
 - **Fixed allow-lists.** Docker commands and cache folders come from fixed lists in the code. Cache cleaning only empties known folders inside your home folder and never follows symlinks.
 - **Careful with processes.** rigtop only signals processes you own. It never touches macOS system agents (`/System`, `/usr`…), itself, or the terminal that launched it, and it checks a pid still belongs to the same program before signalling it. Coding agents and terminals are never suggested as "idle", because waiting for input looks idle.
-- **Local and private.** The server listens on `127.0.0.1` only and rejects requests with any other `Host` header (DNS-rebinding protection). Each run creates a secret key that only appears in the link rigtop opens and prints. Your browser trades it for an `HttpOnly`, `SameSite=Strict` cookie, and every request needs that cookie. Actions also need a per-page token and a same-origin check. Other user accounts on the same Mac can't read your process list or trigger anything, and neither can other websites.
+- **Local and private.** The server listens on `127.0.0.1` only and rejects requests with any other `Host` header (DNS-rebinding protection). Each run creates a secret key that only appears in the link rigtop opens and prints, after the `#`, which browsers never send to any server. The page keeps the key in storage that belongs only to rigtop's own address and port, and sends it as a header on every request. No cookies are used, because browsers send cookies to every port on `127.0.0.1`. Actions also need a same-origin check. Other user accounts on the same Mac, your other local dev servers and other websites can't read your process list or trigger anything.
 - **No root.** No `sudo`, no privileged helpers.
 
 ## Similar tools

@@ -16,7 +16,7 @@ If you're planning something bigger, open an issue first so we can agree on the 
 
 ```bash
 git clone https://github.com/alonstech/rigtop && cd rigtop
-./rigtop --no-open        # then open the http://127.0.0.1:7777/?k=… link it prints
+./rigtop --no-open        # then open the http://127.0.0.1:7777/#k=… link it prints
 ```
 
 - **Dashboard changes** (`dashboard.html`): the server re-reads the file on every page load, so just refresh the browser.
@@ -51,14 +51,13 @@ dashboard.html    the whole UI: vanilla JS + inline SVG charts, no build step, n
 
 | Method | Path | Returns |
 |---|---|---|
-| `GET` | `/?k=<key>` | Sign-in: trades the per-run key (printed in the terminal) for an `HttpOnly; SameSite=Strict` cookie, then redirects to `/` |
-| `GET` | `/` | The dashboard (with the per-page action token injected) |
+| `GET` | `/` | The dashboard: a static page with no secrets in it. Opened as `/#k=<key>`; the page reads the key from the fragment and stores it for this origin only |
 | `GET` | `/api/state?since=<t>&every=<s>` | Everything the UI renders. `since` returns only newer history points; `every` sets the sampling interval. Polling this endpoint is what marks the dashboard as "watching" |
 | `GET` | `/api/procs?group=<name>` | Processes in one app group, with full command lines (`__orphans__` returns orphaned dev processes) |
 | `GET` | `/api/du?path=<dir>` | Folder-explorer sizes for a directory inside your home folder |
-| `POST` | `/api/action` | Every state-changing operation. Also needs the `X-Rigtop-Token` header and a same-origin `Origin`. Body: `{"kind": …}` |
+| `POST` | `/api/action` | Every state-changing operation. Also needs a same-origin `Origin` (or none). Body: `{"kind": …}` |
 
-Every endpoint except the sign-in link needs the sign-in cookie and returns `401` without it. Never add an endpoint that skips this check: other user accounts on the same machine can reach `127.0.0.1` too.
+Every `/api/*` endpoint needs the per-run key in an `X-Rigtop-Key` header and returns `401` (GET) or `403` (POST) without it. Never add an endpoint that skips this check, since other user accounts on the same machine can reach `127.0.0.1` too. Don't move the key into a cookie or a query string either: browsers send cookies to every port on `127.0.0.1`, and query strings end up in logs and history.
 
 ## The rules
 
@@ -115,7 +114,7 @@ There's no automated test suite yet. A small `unittest` suite for the pure helpe
 - [ ] `python3 -m py_compile rigtop.py` passes on Python 3.9.
 - [ ] `./rigtop --once` prints sensible numbers.
 - [ ] The dashboard loads with no errors in the browser console, in light and dark mode, and at a narrow (phone) width.
-- [ ] For a new endpoint or action: rejected without the sign-in cookie (`curl localhost:7777/api/state` returns 401; `curl -X POST localhost:7777/api/action -d '{}'` returns 403) and rejected with bad input.
+- [ ] For a new endpoint or action: rejected without the key (`curl localhost:7777/api/state` returns 401; `curl -X POST localhost:7777/api/action -d '{}'` returns 403) and rejected with bad input.
 - [ ] Never test a cleanup against data you care about. Point a temporary `CACHE_TARGETS` entry at a scratch folder instead.
 
 ## Pull requests

@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="rigtop-token" content="__RIGTOP_TOKEN__">
 <title>rigtop</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231a1a19'/%3E%3Cpath d='M5 17h5l3-7 5 13 3-6h6' fill='none' stroke='%233987e5' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
@@ -395,7 +394,19 @@ dialog .row { display: flex; justify-content: flex-end; gap: 8px; }
 
 <script>
 "use strict";
-const TOKEN = document.querySelector('meta[name="rigtop-token"]').content;
+// The per-run key arrives in the link's fragment (#k=…), which browsers never send to a server.
+// It's kept in storage scoped to this exact origin (host and port), dropped from the address bar,
+// and sent as a header on every API call.
+const KEY = (() => {
+  const m = location.hash.match(/k=([\w-]+)/);
+  if (m) {
+    try { localStorage.setItem("rigtop.key", m[1]); } catch {}
+    history.replaceState(null, "", location.pathname);
+    return m[1];
+  }
+  try { return localStorage.getItem("rigtop.key") || ""; } catch { return ""; }
+})();
+const api = (path, opts = {}) => fetch(path, { ...opts, cache: "no-store", headers: { ...(opts.headers || {}), "X-Rigtop-Key": KEY } });
 const $ = (s, el = document) => el.querySelector(s);
 const GB = 1024 ** 3, MB = 1024 ** 2, WINDOW = 15 * 60;
 const store = {
@@ -417,7 +428,7 @@ const CHEV = '<svg class="chev" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.
 const PRESSURE = { 1: ["good", "Normal", "var(--good)"], 2: ["warning", "Elevated", "var(--warn)"], 4: ["critical", "Critical", "var(--crit)"] };
 
 // ── state ──
-let S = null, hist = [], lastT = 0, every = store.get("every", 3), timer = null, fails = 0, signedOut = false;
+let S = null, hist = [], lastT = 0, every = store.get("every", 3), timer = null, fails = 0, signedOut = !KEY;
 let sortBy = store.get("sort", "cpu"), showAll = false, filter = "";
 const open = new Map();          // group name -> procs[]
 let pointerDown = false;
@@ -454,8 +465,8 @@ function schedule(ms) {
 }
 async function poll() {
   try {
-    const r = await fetch(`/api/state?since=${lastT}&every=${every}`, { cache: "no-store" });
-    signedOut = r.status === 401;     // rigtop restarted with a new key
+    const r = await api(`/api/state?since=${lastT}&every=${every}`);
+    signedOut = r.status === 401;     // no key, or rigtop restarted with a new one
     if (!r.ok) throw new Error(r.status);
     const s = await r.json();
     fails = 0;
@@ -474,7 +485,7 @@ async function poll() {
 function setLive() {
   const d = $("#dot"), t = $("#livetext");
   d.classList.toggle("off", !every); d.classList.toggle("err", fails > 1 || signedOut);
-  t.textContent = signedOut ? "Signed out: rigtop restarted, so open the new link from your terminal" : fails > 1 ? "Can't reach rigtop — is it still running?" : !every ? "Paused" : "Live";
+  t.textContent = signedOut ? "Not signed in: open the link rigtop printed in your terminal (it changes each run)" : fails > 1 ? "Can't reach rigtop — is it still running?" : !every ? "Paused" : "Live";
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(0); else clearTimeout(timer); });
 
@@ -719,7 +730,7 @@ let curDu = null;
 const duCache = new Map();
 async function loadDu(path) {
   try {
-    const r = await (await fetch("/api/du?path=" + encodeURIComponent(path || ""))).json();
+    const r = await (await api("/api/du?path=" + encodeURIComponent(path || ""))).json();
     curDu = r.path; duCache.set(r.path, r); renderExplorer();
   } catch {}
 }
@@ -947,7 +958,7 @@ function renderApps() {
 }
 async function loadProcs(name) {
   try {
-    const procs = await (await fetch("/api/procs?group=" + encodeURIComponent(name))).json();
+    const procs = await (await api("/api/procs?group=" + encodeURIComponent(name))).json();
     open.set(name, procs); drawProcs(name);
   } catch {}
 }
@@ -1002,7 +1013,7 @@ function toast(msg, ok = true, html = false) {
 async function act(payload, btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Working…"; }
   try {
-    const r = await fetch("/api/action", { method: "POST", headers: { "Content-Type": "application/json", "X-Rigtop-Token": TOKEN }, body: JSON.stringify(payload) });
+    const r = await api("/api/action", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const j = await r.json();
     if (!j.job || !j.ok) toast(j.message || (j.ok ? "Done" : "Failed"), j.ok);   // jobs report when they finish
     return j.ok;

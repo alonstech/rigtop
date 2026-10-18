@@ -35,7 +35,6 @@ import sys
 import threading
 import time
 import webbrowser
-from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -1006,23 +1005,18 @@ def do_action(mon, body):
 
 # ───────────────────────────── http ─────────────────────────────
 
-SIGNED_OUT_PAGE = b"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>rigtop</title><body style="font:15px system-ui;margin:15vh auto;max-width:440px;padding:0 16px;color:#52514e">
-<h2 style="color:#0b0b0b">rigtop is running</h2>
-<p>This browser isn't signed in. Open the link that <code>rigtop</code> printed in your terminal
-(it ends in <code>/?k=&hellip;</code>). The key changes every time rigtop starts.</p></body>"""
-
-
-def make_handler(mon, token, key, port):
+def make_handler(mon, key, port):
     allowed_hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
     allowed_origins = {"http://" + h for h in allowed_hosts}
-    # cookies ignore ports, so name ours per port; the key itself is the session secret.
-    # Anyone who can reach 127.0.0.1 (other local users included) must present it.
-    cookie_name = "rigtop_%d" % port
+    # Every API call must carry the per-run key in X-Rigtop-Key. The key reaches the browser only
+    # in the URL fragment (#k=…), which browsers never send to any server, and the page keeps it
+    # in storage scoped to this exact origin (host *and* port). No cookies: those would be sent to
+    # every port on 127.0.0.1. A custom header also can't be sent cross-site without a CORS
+    # preflight, which we never grant, so the key doubles as CSRF protection.
 
-    def page():     # read per page load (rare) so edits to the html show up on refresh
-        with open(os.path.join(HERE, "dashboard.html"), encoding="utf-8") as f:
-            return f.read().replace("__RIGTOP_TOKEN__", token).encode()
+    def page():     # static and secret-free; read per load so edits show up on refresh
+        with open(os.path.join(HERE, "dashboard.html"), "rb") as f:
+            return f.read()
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -1041,32 +1035,17 @@ def make_handler(mon, token, key, port):
             return self.headers.get("Host") in allowed_hosts
 
         def _signed_in(self):
-            try:
-                morsel = SimpleCookie(self.headers.get("Cookie", "")).get(cookie_name)
-            except CookieError:
-                return False
-            return morsel is not None and secrets.compare_digest(morsel.value, key)
+            return secrets.compare_digest(self.headers.get("X-Rigtop-Key", ""), key)
 
         def do_GET(self):
             if not self._host_ok():
                 return self._send(403, {"error": "forbidden"})
             u = urlparse(self.path)
             q = parse_qs(u.query)
-            if u.path == "/" and "k" in q:     # the link rigtop opened: trade the key for a cookie
-                if not secrets.compare_digest(q["k"][0], key):
-                    return self._send(403, SIGNED_OUT_PAGE, "text/html; charset=utf-8")
-                self.send_response(303)        # redirect so the key leaves the address bar and history
-                self.send_header("Set-Cookie", "%s=%s; HttpOnly; SameSite=Strict; Path=/" % (cookie_name, key))
-                self.send_header("Location", "/")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            if not self._signed_in():
-                if u.path == "/":
-                    return self._send(401, SIGNED_OUT_PAGE, "text/html; charset=utf-8")
-                return self._send(401, {"error": "not signed in: open the link rigtop printed in your terminal"})
             if u.path == "/":
                 return self._send(200, page(), "text/html; charset=utf-8")
+            if not self._signed_in():
+                return self._send(401, {"error": "not signed in: open the link rigtop printed in your terminal"})
             if u.path == "/api/state":
                 try:
                     every = float(q.get("every", ["0"])[0])
@@ -1088,9 +1067,7 @@ def make_handler(mon, token, key, port):
 
         def do_POST(self):
             origin = self.headers.get("Origin")
-            if (not self._host_ok() or not self._signed_in()
-                    or not secrets.compare_digest(self.headers.get("X-Rigtop-Token", ""), token)
-                    or (origin and origin not in allowed_origins)):
+            if not self._host_ok() or not self._signed_in() or (origin and origin not in allowed_origins):
                 return self._send(403, {"ok": False, "message": "forbidden"})
             if urlparse(self.path).path != "/api/action":
                 return self._send(404, {"error": "not found"})
@@ -1200,12 +1177,11 @@ def main():
     if a.once:
         return print_once(mon)
 
-    token = secrets.token_urlsafe(18)    # anti-CSRF header, embedded in the (signed-in) page
-    key = secrets.token_urlsafe(24)      # sign-in secret, only ever in the link we open/print
+    key = secrets.token_urlsafe(24)      # per-run secret, only ever in the link we open/print
     server = None
     for port in range(a.port, a.port + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(mon, token, key, port))
+            server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(mon, key, port))
             break
         except OSError:
             continue
@@ -1213,7 +1189,7 @@ def main():
         sys.exit("no free port near %d" % a.port)
     server.daemon_threads = True
     url = "http://127.0.0.1:%d" % port
-    link = "%s/?k=%s" % (url, key)
+    link = "%s/#k=%s" % (url, key)
 
     mon.sample(with_procs=False)
     for target in (mon.loop, mon.docker_loop, mon.cache_loop, server.serve_forever):
