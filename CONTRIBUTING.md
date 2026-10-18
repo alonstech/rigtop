@@ -16,12 +16,13 @@ If you're planning something bigger, open an issue first so we can agree on the 
 
 ```bash
 git clone https://github.com/alonstech/rigtop && cd rigtop
-./rigtop --no-open        # then open http://127.0.0.1:7777
+./rigtop --no-open        # then open the http://127.0.0.1:7777/?k=… link it prints
 ```
 
 - **Dashboard changes** (`dashboard.html`): the server re-reads the file on every page load, so just refresh the browser.
 - **Server changes** (`rigtop.py`): stop with Ctrl+C and start again.
 - `./rigtop --once` prints a text snapshot. It's the quickest way to check the collectors.
+- `./rigtop --demo` serves made-up data, and every button is a no-op. Use it for UI work you don't want touching your real processes, and **for any screenshot you post** (real ones show your hostname, command lines and container names).
 - Run `python3 -m py_compile rigtop.py` before sending a PR. The code must run on **Python 3.9** (the version macOS ships), so avoid `match`, `X | Y` type unions and other newer syntax.
 
 ## How it fits together
@@ -50,11 +51,14 @@ dashboard.html    the whole UI: vanilla JS + inline SVG charts, no build step, n
 
 | Method | Path | Returns |
 |---|---|---|
-| `GET` | `/` | The dashboard (with the per-run token injected) |
+| `GET` | `/?k=<key>` | Sign-in: trades the per-run key (printed in the terminal) for an `HttpOnly; SameSite=Strict` cookie, then redirects to `/` |
+| `GET` | `/` | The dashboard (with the per-page action token injected) |
 | `GET` | `/api/state?since=<t>&every=<s>` | Everything the UI renders. `since` returns only newer history points; `every` sets the sampling interval. Polling this endpoint is what marks the dashboard as "watching" |
 | `GET` | `/api/procs?group=<name>` | Processes in one app group, with full command lines (`__orphans__` returns orphaned dev processes) |
 | `GET` | `/api/du?path=<dir>` | Folder-explorer sizes for a directory inside your home folder |
-| `POST` | `/api/action` | Every state-changing operation. Requires the `X-Rigtop-Token` header. Body: `{"kind": …}` |
+| `POST` | `/api/action` | Every state-changing operation. Also needs the `X-Rigtop-Token` header and a same-origin `Origin`. Body: `{"kind": …}` |
+
+Every endpoint except the sign-in link needs the sign-in cookie and returns `401` without it. Never add an endpoint that skips this check: other user accounts on the same machine can reach `127.0.0.1` too.
 
 ## The rules
 
@@ -111,14 +115,14 @@ There's no automated test suite yet. A small `unittest` suite for the pure helpe
 - [ ] `python3 -m py_compile rigtop.py` passes on Python 3.9.
 - [ ] `./rigtop --once` prints sensible numbers.
 - [ ] The dashboard loads with no errors in the browser console, in light and dark mode, and at a narrow (phone) width.
-- [ ] For a new action: rejected without the token (`curl -X POST localhost:7777/api/action -d '{}'` returns 403) and rejected with bad input.
+- [ ] For a new endpoint or action: rejected without the sign-in cookie (`curl localhost:7777/api/state` returns 401; `curl -X POST localhost:7777/api/action -d '{}'` returns 403) and rejected with bad input.
 - [ ] Never test a cleanup against data you care about. Point a temporary `CACHE_TARGETS` entry at a scratch folder instead.
 
 ## Pull requests
 
 - Keep PRs focused: one feature or fix each.
 - Match the style around your change: plain functions, short comments that explain *why*, no new abstractions without a second use.
-- Include a screenshot for UI changes. Use test data or blur anything personal (hostnames, process arguments, container names).
+- Include a screenshot for UI changes, taken with `./rigtop --demo`.
 - By contributing, you agree your work is released under the [MIT License](LICENSE).
 
 Be kind in issues and reviews. Everyone here is trying to make their laptop a little less miserable.

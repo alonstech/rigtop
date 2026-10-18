@@ -417,7 +417,7 @@ const CHEV = '<svg class="chev" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.
 const PRESSURE = { 1: ["good", "Normal", "var(--good)"], 2: ["warning", "Elevated", "var(--warn)"], 4: ["critical", "Critical", "var(--crit)"] };
 
 // ── state ──
-let S = null, hist = [], lastT = 0, every = store.get("every", 3), timer = null, fails = 0;
+let S = null, hist = [], lastT = 0, every = store.get("every", 3), timer = null, fails = 0, signedOut = false;
 let sortBy = store.get("sort", "cpu"), showAll = false, filter = "";
 const open = new Map();          // group name -> procs[]
 let pointerDown = false;
@@ -455,6 +455,7 @@ function schedule(ms) {
 async function poll() {
   try {
     const r = await fetch(`/api/state?since=${lastT}&every=${every}`, { cache: "no-store" });
+    signedOut = r.status === 401;     // rigtop restarted with a new key
     if (!r.ok) throw new Error(r.status);
     const s = await r.json();
     fails = 0;
@@ -472,8 +473,8 @@ async function poll() {
 }
 function setLive() {
   const d = $("#dot"), t = $("#livetext");
-  d.classList.toggle("off", !every); d.classList.toggle("err", fails > 1);
-  t.textContent = fails > 1 ? "Can't reach rigtop — is it still running?" : !every ? "Paused" : "Live";
+  d.classList.toggle("off", !every); d.classList.toggle("err", fails > 1 || signedOut);
+  t.textContent = signedOut ? "Signed out: rigtop restarted, so open the new link from your terminal" : fails > 1 ? "Can't reach rigtop — is it still running?" : !every ? "Paused" : "Live";
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) schedule(0); else clearTimeout(timer); });
 

@@ -11,7 +11,9 @@ git clone https://github.com/alonstech/rigtop && cd rigtop && ./rigtop
 
 No install, no `pip`, no Homebrew. One Python file and one HTML file.
 
-<!-- TODO: add docs/screenshot.png (taken in demo mode so it shows no personal data) -->
+![rigtop dashboard: CPU, memory pressure, memory and disk tiles, each with one-tap actions, plus plain-language suggestions](docs/screenshot-dashboard.png)
+
+<sub>Screenshots are from `./rigtop --demo`, which shows made-up data.</sub>
 
 ---
 
@@ -36,13 +38,15 @@ cd rigtop
 ./rigtop
 ```
 
-Your browser opens at `http://127.0.0.1:7777`, and the terminal shows a live line:
+Your browser opens the dashboard at a private link (`http://127.0.0.1:7777/?k=…`), and the terminal shows a live line:
 
 ```
 ● rigtop http://127.0.0.1:7777  CPU  47% ▮▮▮▮▯▯▯▯  MEM 26.1/32 GB  pressure normal  swap 2.9 GB  disk 41.0 GB free  docker 3 up · cache 9.8 GB  dashboard open
 ```
 
 **Requirements:** macOS with Python 3.9+. The Python that ships with Xcode Command Line Tools (`/usr/bin/python3`) is enough; if you don't have it, run `xcode-select --install`. The launcher always uses that system Python, so asdf, pyenv or an active virtualenv can't get in the way. Docker is optional.
+
+If you close the tab, reopen the link printed in the terminal. The key changes every time rigtop starts.
 
 To run it from anywhere:
 
@@ -52,13 +56,26 @@ ln -s "$(pwd)/rigtop" ~/.local/bin/rigtop
 
 | Option | Default | What it does |
 |---|---|---|
-| `--no-open` | off | Don't open a browser tab |
+| `--no-open` | off | Don't open a browser tab. Open the link rigtop prints instead |
 | `--once` | off | Print a text snapshot and exit. Handy inside an agent session or a script |
 | `--port N` | `7777` | Port to listen on (moves up automatically if it's taken) |
 | `--interval S` | `3` | Seconds between samples while the dashboard is open |
 | `--docker-interval S` | `10` | Seconds between `docker stats` calls while the dashboard is open |
+| `--demo` | off | Show made-up data instead of your machine's. Every button is a no-op. Useful for screenshots, demos and UI work |
 
 ## What you get
+
+### Screenshots
+
+| Free up disk space | What's using your Mac |
+|---|---|
+| ![Cleanup panel listing developer caches, Docker and app caches with sizes and Clean buttons, next to a folder explorer](docs/screenshot-cleanup.png) | ![Apps grouped by name with CPU and memory bars; node expanded to show each process's command line with Quit and Force buttons](docs/screenshot-apps.png) |
+| **Docker** | **Light mode** |
+| ![Docker disk usage with prune buttons, and containers grouped by compose project](docs/screenshot-docker.png) | ![The dashboard in light mode](docs/screenshot-light.png) |
+
+![15 minutes of CPU and memory history with a memory-pressure strip](docs/screenshot-charts.png)
+
+### Features
 
 **Four tiles, each with an action.** Every tile ends in a short list of the things worth acting on:
 
@@ -112,7 +129,7 @@ rigtop can delete files and end processes, so it's deliberately conservative.
 - **Two taps for quick actions.** The first tap arms the button (it turns red), the second within 3.5 s runs it. Anything that can lose data (unused Docker volumes, all unused images, emptying the Trash, restarting Docker) opens a dialog showing the exact command instead.
 - **Fixed allow-lists.** Docker commands and cache folders come from fixed lists in the code. Cache cleaning only empties known folders inside your home folder and never follows symlinks.
 - **Careful with processes.** rigtop only signals processes you own. It never touches macOS system agents (`/System`, `/usr`…), itself, or the terminal that launched it, and it checks a pid still belongs to the same program before signalling it. Coding agents and terminals are never suggested as "idle", because waiting for input looks idle.
-- **Local only.** The server listens on `127.0.0.1` only and rejects requests with any other `Host` header (DNS-rebinding protection). Every action needs a per-run token embedded in the page, so no other website can trigger a cleanup.
+- **Local and private.** The server listens on `127.0.0.1` only and rejects requests with any other `Host` header (DNS-rebinding protection). Each run creates a secret key that only appears in the link rigtop opens and prints. Your browser trades it for an `HttpOnly`, `SameSite=Strict` cookie, and every request needs that cookie. Actions also need a per-page token and a same-origin check. Other user accounts on the same Mac can't read your process list or trigger anything, and neither can other websites.
 - **No root.** No `sudo`, no privileged helpers.
 
 ## Similar tools
@@ -139,7 +156,6 @@ rigtop's angle is the combination of a live view plus one-tap fixes, tuned for a
 
 - Linux backend, then Windows
 - Group processes by **agent session or worktree** ("this Claude session and its dev servers use 4 GB")
-- `--demo` mode with synthetic data, for screenshots and UI work on any OS
 - Find stale `node_modules` / `.venv` / `target/` folders in old projects
 - Alerts: a macOS notification when pressure turns critical or disk drops below a threshold
 - Per-agent token or cost overlays, for agents that expose them

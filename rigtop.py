@@ -20,8 +20,10 @@ import collections
 import ctypes
 import ctypes.util
 import json
+import math
 import os
 import platform
+import random
 import re
 import resource
 import secrets
@@ -33,6 +35,7 @@ import sys
 import threading
 import time
 import webbrowser
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -250,11 +253,12 @@ def group_of(path, docker_vm_name):
 class Jobs:
     """Long cleanups run off the request thread; the dashboard polls their state."""
 
-    def __init__(self, on_done):
+    def __init__(self, on_done, measure=True):
         self.lock = threading.Lock()
         self.items = collections.OrderedDict()
         self.n = 0
         self.on_done = on_done
+        self.measure = measure      # compare free disk before/after to report "freed X GB"
 
     def start(self, key, label, fn):
         with self.lock:
@@ -268,12 +272,12 @@ class Jobs:
                 self.items.popitem(last=False)
 
         def runner():
-            before = disk_usage()[1]
+            before = disk_usage()[1] if self.measure else 0
             try:
                 ok, msg = fn()
             except Exception as e:
                 ok, msg = False, str(e)
-            freed = max(disk_usage()[1] - before, 0)
+            freed = max(disk_usage()[1] - before, 0) if self.measure else 0
             with self.lock:
                 job.update(state="done" if ok else "failed", message=msg, t1=time.time(), freed=freed)
             self.on_done(key)
@@ -293,6 +297,7 @@ class Jobs:
 # ───────────────────────────── the monitor ─────────────────────────────
 
 class Monitor:
+    demo = False
     def __init__(self, interval, docker_interval):
         self.interval = interval
         self.docker_interval = docker_interval
@@ -344,7 +349,7 @@ class Monitor:
     # watching = a dashboard tab polled recently
     def touch(self, every=None):
         was_idle = not self.watching()
-        if every:   # the dashboard's refresh picker drives the sampling cadence
+        if every and math.isfinite(every):   # the dashboard's refresh picker drives the sampling cadence
             self.interval = min(max(every, 1.0), 60.0)
         self.last_client = time.time()
         if was_idle:
@@ -640,6 +645,185 @@ class Monitor:
         return procs
 
 
+# ───────────────────────────── demo mode ─────────────────────────────
+# `--demo` serves invented data, so screenshots never show a real machine and the UI can be
+# worked on safely. Nothing in this section reads processes, runs commands or changes anything.
+
+DEMO_HOME = "/Users/demo"
+
+
+def _wave(t, period, lo, hi, phase=0.0):
+    return lo + (hi - lo) * (0.5 + 0.5 * math.sin(2 * math.pi * t / period + phase))
+
+
+# name, processes, % of machine CPU, memory GB, quittable app, yours (not system), sample command lines
+DEMO_APPS = [
+    ("node", 14, 7.9, 3.4, False, True, [
+        "node /Users/demo/code/shop-web/node_modules/.bin/next dev -p 3000",
+        "node /Users/demo/code/shop-web/node_modules/.bin/vitest --watch",
+        "node /Users/demo/code/admin/node_modules/.bin/vite --port 5173",
+        "npm exec @modelcontextprotocol/server-filesystem /Users/demo/code",
+        "node /Users/demo/code/shop-web/node_modules/typescript/lib/tsserver.js"]),
+    ("Docker VM", 1, 4.6, 6.2, False, True, ["com.apple.Virtualization.VirtualMachine"]),
+    ("Claude Code", 4, 5.8, 2.1, False, True, [
+        "claude --continue", "claude", "claude -p \"fix the flaky checkout test\"", "claude --resume"]),
+    ("Google Chrome", 41, 3.2, 4.6, True, True, [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "Google Chrome Helper (Renderer) --type=renderer"]),
+    ("Cursor", 11, 1.9, 2.4, True, True, ["/Applications/Cursor.app/Contents/MacOS/Cursor", "Cursor Helper (Plugin)"]),
+    ("chrome-headless-shell", 6, 3.1, 1.1, False, True, ["chrome-headless-shell --headless --remote-debugging-pipe"]),
+    ("Codex CLI", 2, 2.4, 0.8, False, True, ["codex", "codex exec \"update the README\""]),
+    ("python3.12", 3, 1.2, 0.5, False, True, ["python3.12 -m uvicorn api.main:app --reload", "python3.12 -m pytest -x"]),
+    ("Docker Desktop", 9, 0.9, 0.6, True, True, ["/Applications/Docker.app/Contents/MacOS/com.docker.backend"]),
+    ("Slack", 6, 0.1, 0.9, True, True, ["/Applications/Slack.app/Contents/MacOS/Slack"]),
+    ("Spotify", 4, 0.1, 0.6, True, True, ["/Applications/Spotify.app/Contents/MacOS/Spotify"]),
+    ("kernel_task", 1, 3.4, 0.1, False, False, ["kernel_task"]),
+    ("WindowServer", 1, 2.1, 0.2, False, False, ["/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"]),
+    ("mds_stores", 1, 0.8, 0.1, False, False, ["/System/Library/Frameworks/CoreServices.framework/mds_stores"]),
+]
+DEMO_ORPHANS = ["node /Users/demo/code/api/node_modules/.bin/tsx watch src/server.ts",
+                "node /Users/demo/code/shop-web/node_modules/.bin/playwright test --ui"]
+
+
+class DemoMonitor(Monitor):
+    demo = True
+
+    def __init__(self, interval, docker_interval):
+        super().__init__(interval, docker_interval)
+        self.jobs = Jobs(self._job_done, measure=False)
+        self.ncpu = 10
+        self.host = {"name": "demo-mac", "chip": "Apple M5", "cores": 10, "pcores": 4, "ecores": 6,
+                     "mem_total": 32 * GB, "os": "macOS 26.1"}
+        self.self_stats = {"cpu": 0.08, "rss": 22 * 1024 ** 2}
+        self.rng = random.Random(7)
+        now = time.time()
+        for i in range(HISTORY_SECONDS // 3, 0, -1):     # 15 minutes of believable history
+            self._fake_sample(now - i * 3)
+        self._fake_world(now)
+
+    def _fake_sample(self, t):
+        r = self.rng
+        user = _wave(t, 240, 22, 46) + r.uniform(-4, 4)
+        system = _wave(t, 170, 6, 11, 1.3) + r.uniform(-1.5, 1.5)
+        cores = [round(max(2.0, min(100.0, (user + system) * f + r.uniform(-8, 8))), 1)
+                 for f in (1.7, 1.6, 1.5, 1.4, 0.9, 0.8, 0.7, 0.6, 0.5, 0.5)]
+        app, compressed = _wave(t, 600, 12.6, 14.2) * GB, _wave(t, 420, 6.2, 7.8, 0.7) * GB
+        wired, cached, swap, total = 4.6 * GB, 4.9 * GB, 3.1 * GB, 32 * GB
+        level = 2 if compressed > 7.2 * GB else 1
+        free_pct = 31 if level == 2 else 38
+        mem = {"total": total, "app": app, "wired": wired, "compressed": compressed, "cached": cached,
+               "used": app + wired + compressed, "free": max(total - app - wired - compressed - cached, 0),
+               "pressure_level": level, "free_pct": free_pct, "swap_total": 4 * GB, "swap_used": swap,
+               "swapins": 0, "swapouts": r.choice([0, 0, 0, 180 * 1024]), "pageins": 0, "compressions": r.uniform(20, 90) * 1024 ** 2}
+        self.state = {"t": t, "cpu": {"total": round(user + system, 1), "user": round(user, 1), "system": round(system, 1), "cores": cores},
+                      "load": [7.8, 8.4, 8.1], "mem": mem, "disk": {"total": 994 * 10 ** 9, "free": 38 * 10 ** 9}}
+        self.history.append([round(t, 1), round(user, 1), round(system, 1), round(app / GB, 3), round(wired / GB, 3),
+                             round(compressed / GB, 3), round(cached / GB, 3), round(swap / GB, 3), level, free_pct])
+
+    def _fake_world(self, now):
+        pid = iter(range(41000, 49000, 7))
+        apps, procs = [], {}
+        for name, count, cpu, mem_gb, quittable, own, cmds in DEMO_APPS:
+            apps.append({"name": name, "count": count, "cpu": cpu, "mem": int(mem_gb * GB), "quittable": quittable,
+                         "own": own, "killable": own and name != "Docker VM"})
+            procs[name] = [{"pid": next(pid), "cpu": round(cpu / min(count, 6), 2), "cores": round(cpu / min(count, 6) / 10, 2),
+                            "mem": int(mem_gb * GB / min(count, 6)), "path": cmds[i % len(cmds)].split(" ")[0],
+                            "args": cmds[i % len(cmds)], "own": own} for i in range(min(count, 6))]
+        apps.append({"name": "rigtop (this tool)", "count": 1, "cpu": 0.08, "mem": 22 * 1024 ** 2,
+                     "quittable": False, "own": True, "killable": False})
+        self.orphans = [{"pid": next(pid), "cpu": 0.4, "cores": 0.04, "mem": int(m * 1024 ** 2), "path": "node", "args": a, "own": True}
+                        for a, m in zip(DEMO_ORPHANS, (310, 420))]
+        procs["__orphans__"] = self.orphans
+        self.apps, self.procs, self.apps_t = apps, procs, now
+
+        def ctr(cid, name, image, project, state, status, cpu=0.0, mem_mb=0):
+            return {"id": cid, "name": name, "image": image, "state": state, "status": status, "ports": "",
+                    "project": project, "cpu": cpu, "mem": mem_mb * 1024 ** 2, "mem_limit": 8 * GB}
+        self.docker = {"available": True, "running": True, "error": None, "t": now, "df_t": now,
+                       "vm": {"mem_limit": 8 * GB, "cpus": 6, "version": "28.0.1"},
+                       "containers": [
+                           ctr("a1b2c3d4e5f6", "shop-api-1", "shop-api:dev", "shop", "running", "Up 2 hours", 6.8, 410),
+                           ctr("b2c3d4e5f6a1", "shop-postgres-1", "postgres:16", "shop", "running", "Up 2 hours", 1.2, 180),
+                           ctr("c3d4e5f6a1b2", "shop-redis-1", "redis:7", "shop", "running", "Up 2 hours", 0.4, 12),
+                           ctr("d4e5f6a1b2c3", "shop-worker-1", "shop-worker:dev", "shop", "exited", "Exited (137) 40 minutes ago"),
+                           ctr("e5f6a1b2c3d4", "analytics-clickhouse-1", "clickhouse/clickhouse-server:24.8", "analytics", "running", "Up 5 hours", 3.1, 1310),
+                           ctr("f6a1b2c3d4e5", "mailpit", "axllent/mailpit", None, "running", "Up 3 days", 0.1, 25)],
+                       "df": {"build_cache": {"size": int(14.2 * GB), "reclaimable": int(11.8 * GB), "count": 214, "active": 0},
+                              "images": {"size": int(9.4 * GB), "reclaimable": int(3.1 * GB), "count": 23, "active": 6},
+                              "volumes": {"size": int(4.2 * GB), "reclaimable": int(2.6 * GB), "count": 17, "active": 5},
+                              "containers": {"size": 310 * 1024 ** 2, "reclaimable": 120 * 1024 ** 2, "count": 6, "active": 5}}}
+        sizes = {"go-build": 41.3, "uv": 5.1, "npm": 3.2, "xcode": 7.4, "go-mod": 2.2, "hf": 3.8, "playwright": 1.1, "pip": 0.6, "brew": 0.4}
+        self.caches = {"t": now, "scanning": False,
+                       "targets": sorted([{"id": t["id"], "label": t["label"], "path": t["path"].replace(HOME, DEMO_HOME), "safe": t["safe"],
+                                           "hint": t["hint"], "size": int(sizes[t["id"]] * GB)} for t in CACHE_TARGETS if t["id"] in sizes],
+                                         key=lambda c: c["size"], reverse=True),
+                       "app_caches": [{"id": "appcache:" + n, "label": n, "path": DEMO_HOME + "/Library/Caches/" + n, "size": int(g * GB)}
+                                      for n, g in (("Google", 2.4), ("com.spotify.client", 1.3), ("Cursor", 0.9), ("com.tinyspeck.slackmacgap", 0.5))]}
+
+        def folder(path, items):
+            return {"t": now, "total": int(sum(g for _, g in items) * GB),
+                    "items": [{"name": n, "path": path + "/" + n, "size": int(g * GB)} for n, g in items]}
+        self.du = {DEMO_HOME: folder(DEMO_HOME, [("Library", 312), ("code", 188), ("Movies", 96), ("Downloads", 64), (".cache", 48),
+                                                 (".ollama", 41), ("go", 22), (".docker", 9), ("Documents", 7)]),
+                   DEMO_HOME + "/code": folder(DEMO_HOME + "/code", [("shop-web", 61), ("ml-experiments", 54), ("admin", 31), ("api", 24), ("old-prototypes", 18)]),
+                   DEMO_HOME + "/Library": folder(DEMO_HOME + "/Library", [("Caches", 63), ("Containers", 118), ("Application Support", 71),
+                                                                         ("Developer", 46), ("Group Containers", 14)])}
+
+    def sample(self, with_procs):
+        with self.lock:
+            self._fake_sample(time.time())
+            for a in self.apps:     # a little movement so the dashboard looks alive
+                if a["cpu"] > 0.5:
+                    a["cpu"] = round(max(0.3, a["cpu"] * self.rng.uniform(0.85, 1.15)), 2)
+
+    def docker_loop(self):
+        while True:
+            with self.lock:
+                for c in self.docker["containers"]:
+                    if c["state"] == "running" and c["cpu"] > 0.2:
+                        c["cpu"] = round(max(0.1, c["cpu"] * self.rng.uniform(0.8, 1.2)), 1)
+                self.docker["t"] = time.time()
+            time.sleep(self.docker_interval)
+
+    def cache_loop(self):
+        pass
+
+    def _job_done(self, key):
+        self.wake.set()
+
+    def group_procs(self, name):
+        with self.lock:
+            return [dict(p) for p in self.procs.get(name, [])]
+
+    def snapshot(self, since=0.0):
+        s = super().snapshot(since)
+        s["home"] = DEMO_HOME
+        return s
+
+    def demo_du(self, path):
+        path = path if (path or "").startswith(DEMO_HOME) else DEMO_HOME
+        with self.lock:
+            r = self.du.get(path)
+        return dict(r, path=path) if r else {"path": path, "pending": True}
+
+
+def demo_action(mon, body):
+    """Every button "works" in demo mode, and nothing is ever changed."""
+    kind, msg = body.get("kind"), "demo mode: nothing was changed"
+    key = {"docker": "docker:%s" % body.get("action"), "cache": "cache:%s" % body.get("id"), "clean-selected": "clean-selected",
+           "trash": "trash", "scan": "scan:%s" % body.get("path"), "scan-caches": "cache-scan"}.get(kind)
+    if body.get("kind") == "cache" and str(body.get("id", "")).startswith("appcache:"):
+        key = body["id"]
+    if key is None:
+        return 200, {"ok": True, "message": msg}
+
+    def fn():
+        time.sleep(2)
+        return True, msg
+    jid = mon.jobs.start(key, "Demo: " + kind.replace("-", " "), fn)
+    return 200, {"ok": True, "job": jid, "message": msg}
+
+
 # ───────────────────────────── actions (strict allow-list) ─────────────────────────────
 
 DOCKER_ACTIONS = {
@@ -822,9 +1006,19 @@ def do_action(mon, body):
 
 # ───────────────────────────── http ─────────────────────────────
 
-def make_handler(mon, token, port):
+SIGNED_OUT_PAGE = b"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>rigtop</title><body style="font:15px system-ui;margin:15vh auto;max-width:440px;padding:0 16px;color:#52514e">
+<h2 style="color:#0b0b0b">rigtop is running</h2>
+<p>This browser isn't signed in. Open the link that <code>rigtop</code> printed in your terminal
+(it ends in <code>/?k=&hellip;</code>). The key changes every time rigtop starts.</p></body>"""
+
+
+def make_handler(mon, token, key, port):
     allowed_hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
     allowed_origins = {"http://" + h for h in allowed_hosts}
+    # cookies ignore ports, so name ours per port; the key itself is the session secret.
+    # Anyone who can reach 127.0.0.1 (other local users included) must present it.
+    cookie_name = "rigtop_%d" % port
 
     def page():     # read per page load (rare) so edits to the html show up on refresh
         with open(os.path.join(HERE, "dashboard.html"), encoding="utf-8") as f:
@@ -846,22 +1040,45 @@ def make_handler(mon, token, port):
         def _host_ok(self):    # blocks DNS-rebinding: only answer to our own address
             return self.headers.get("Host") in allowed_hosts
 
+        def _signed_in(self):
+            try:
+                morsel = SimpleCookie(self.headers.get("Cookie", "")).get(cookie_name)
+            except CookieError:
+                return False
+            return morsel is not None and secrets.compare_digest(morsel.value, key)
+
         def do_GET(self):
             if not self._host_ok():
                 return self._send(403, {"error": "forbidden"})
             u = urlparse(self.path)
             q = parse_qs(u.query)
+            if u.path == "/" and "k" in q:     # the link rigtop opened: trade the key for a cookie
+                if not secrets.compare_digest(q["k"][0], key):
+                    return self._send(403, SIGNED_OUT_PAGE, "text/html; charset=utf-8")
+                self.send_response(303)        # redirect so the key leaves the address bar and history
+                self.send_header("Set-Cookie", "%s=%s; HttpOnly; SameSite=Strict; Path=/" % (cookie_name, key))
+                self.send_header("Location", "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if not self._signed_in():
+                if u.path == "/":
+                    return self._send(401, SIGNED_OUT_PAGE, "text/html; charset=utf-8")
+                return self._send(401, {"error": "not signed in: open the link rigtop printed in your terminal"})
             if u.path == "/":
                 return self._send(200, page(), "text/html; charset=utf-8")
             if u.path == "/api/state":
                 try:
                     every = float(q.get("every", ["0"])[0])
+                    since = float(q.get("since", ["0"])[0] or 0)
                 except ValueError:
-                    every = 0
+                    return self._send(400, {"error": "bad number"})
                 mon.touch(every)
-                return self._send(200, mon.snapshot(float(q.get("since", ["0"])[0] or 0)))
+                return self._send(200, mon.snapshot(since if math.isfinite(since) else 0.0))
             if u.path == "/api/procs":
                 return self._send(200, mon.group_procs(q.get("group", [""])[0]))
+            if u.path == "/api/du" and mon.demo:
+                return self._send(200, mon.demo_du(q.get("path", [""])[0]))
             if u.path == "/api/du":
                 path = under_home(q.get("path", [HOME])[0] or HOME, allow_home=True) or HOME
                 with mon.lock:
@@ -871,7 +1088,8 @@ def make_handler(mon, token, port):
 
         def do_POST(self):
             origin = self.headers.get("Origin")
-            if (not self._host_ok() or self.headers.get("X-Rigtop-Token") != token
+            if (not self._host_ok() or not self._signed_in()
+                    or not secrets.compare_digest(self.headers.get("X-Rigtop-Token", ""), token)
                     or (origin and origin not in allowed_origins)):
                 return self._send(403, {"ok": False, "message": "forbidden"})
             if urlparse(self.path).path != "/api/action":
@@ -880,7 +1098,7 @@ def make_handler(mon, token, port):
                 body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 65536)) or b"{}")
             except ValueError:
                 return self._send(400, {"ok": False, "message": "bad json"})
-            code, resp = do_action(mon, body)
+            code, resp = (demo_action if mon.demo else do_action)(mon, body)
             self._send(code, resp)
 
     return H
@@ -971,19 +1189,23 @@ def main():
     ap.add_argument("--docker-interval", type=float, default=10.0, help="seconds between docker stats while open")
     ap.add_argument("--no-open", action="store_true", help="don't open a browser tab")
     ap.add_argument("--once", action="store_true", help="print a snapshot and exit")
+    ap.add_argument("--demo", action="store_true", help="serve made-up data (for screenshots and UI work); every button is a no-op")
     a = ap.parse_args()
     if sys.platform != "darwin":
         sys.exit("rigtop reads macOS kernel stats and only runs on macOS.")
 
-    mon = Monitor(max(a.interval, 1.0), max(a.docker_interval, 3.0))
+    if a.demo and a.once:
+        sys.exit("--demo only applies to the dashboard, not --once.")
+    mon = (DemoMonitor if a.demo else Monitor)(max(a.interval, 1.0), max(a.docker_interval, 3.0))
     if a.once:
         return print_once(mon)
 
-    token = secrets.token_urlsafe(18)
+    token = secrets.token_urlsafe(18)    # anti-CSRF header, embedded in the (signed-in) page
+    key = secrets.token_urlsafe(24)      # sign-in secret, only ever in the link we open/print
     server = None
     for port in range(a.port, a.port + 20):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(mon, token, port))
+            server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(mon, token, key, port))
             break
         except OSError:
             continue
@@ -991,16 +1213,17 @@ def main():
         sys.exit("no free port near %d" % a.port)
     server.daemon_threads = True
     url = "http://127.0.0.1:%d" % port
+    link = "%s/?k=%s" % (url, key)
 
     mon.sample(with_procs=False)
     for target in (mon.loop, mon.docker_loop, mon.cache_loop, server.serve_forever):
         threading.Thread(target=target, daemon=True).start()
 
     tty = sys.stdout.isatty()
-    print(ansi(tty)("1", "rigtop") + " is watching this Mac → " + url)
-    print(ansi(tty)("2", "Sampling is cheap kernel reads only, until the dashboard is open. Ctrl+C to quit.\n"))
+    print(ansi(tty)("1", "rigtop") + (" demo (made-up data, buttons do nothing) → " if a.demo else " is watching this Mac → ") + link)
+    print(ansi(tty)("2", "Sampling is cheap kernel reads only, until the dashboard is open. Ctrl+C to quit.\n"), flush=True)
     if not a.no_open:
-        webbrowser.open(url)
+        webbrowser.open(link)
     try:
         while True:
             if tty:
